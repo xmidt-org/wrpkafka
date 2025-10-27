@@ -3,62 +3,81 @@
 
 # Proposal: WRP-to-Kafka Event Publisher Library using franz-go
 
-## 1. Executive Summary
+## Executive Summary
 
-A reusable Go library (`github.com/xmidt-org/wrpkafka`) that publishes WRP (Web Routing Protocol) messages to Kafka topics using the franz-go client library. Initially designed for Talaria integration, the library provides a high-throughput, reliable event streaming mechanism that can run alongside existing delivery systems. The library is decoupled from specific metrics and logging frameworks, making it suitable for various applications beyond Talaria.
+A reusable Go library (`github.com/xmidt-org/wrpkafka`) that publishes WRP (Web Routing Protocol) messages to Kafka topics using the [franz-go](https://github.com/twmb/franz-go) client library. Initially designed for Talaria integration, the library provides a high-throughput, reliable event streaming mechanism that can run alongside existing delivery systems. The library is decoupled from specific metrics and logging frameworks, making it suitable for various applications beyond Talaria.
 
 **Key Features:**
-- Three publish modes aligning with franz-go API:
-  - `Produce()` - async with callback, waits if buffer full (high throughput)
-  - `TryProduce()` - async with callback, fails immediately if buffer full (non-blocking)
-  - `ProduceSync()` - synchronous with acknowledgment (immediate feedback)
+- Single `Produce()` method with WRP QoS-aware routing:
+  - QoS 0-24 (Low): Fire-and-forget, drops if buffer full
+  - QoS 25-74 (Medium/High): Async delivery with automatic retries (franz-go handles retry logic)
+  - QoS 75-99 (Critical): Synchronous with Kafka confirmation
+  - Returns explicit outcome (Accepted, Queued, Dropped, Failed)
 - Multiple topic sharding strategies (round-robin, device-based, metadata-based)
-- Configurable via YAML with runtime dependencies via options pattern
+- Configurable with runtime dependencies via options pattern
 - Metrics-agnostic with callback interface
 - Per-device message ordering guarantees
 - Production-ready with comprehensive error handling
 - Works directly with `wrp.Message` for maximum flexibility
 
-## 2. Use Case: Talaria Integration
+## Table of Contents
 
-This library is initially designed for integration with Talaria, an xmidt-org WebSocket connection manager. Understanding Talaria's architecture helps illustrate the library's purpose and integration pattern.
+- [Executive Summary](#executive-summary)
+1. [Library Architecture](#1-library-architecture)
+   - [Design Principles](#11-design-principles)
+   - [Component Design](#12-component-design)
+   - [Quick Start Example](#13-quick-start-example)
+   - [Configuration Mutability and Hot-Reload](#14-configuration-mutability-and-hot-reload)
+   - [Public API Surface](#15-public-api-surface)
+   - [Component Details](#16-component-details)
+   - [Message Format](#17-message-format)
+   - [WRP Event Processing](#18-wrp-event-processing)
+   - [Topic Selection Strategies](#19-topic-selection-strategies)
+   - [Partitioning](#110-partitioning)
+   - [Topic Matching with Pattern Matching](#111-topic-matching-with-pattern-matching)
+   - [franz-go Promise Callback Pattern](#112-franz-go-promise-callback-pattern)
+   - [WRP QoS-Aware Message Production](#113-wrp-qos-aware-message-production)
+   - [Integration Example (Talaria)](#114-integration-example-talaria)
+   - [Configuration Schema](#115-configuration-schema)
+   - [Metrics](#116-metrics)
+   - [Error Handling](#117-error-handling)
+   - [Testing Strategy](#118-testing-strategy)
+2. [Advantages of This Library Design](#2-advantages-of-this-library-design)
+3. [Operational Considerations](#3-operational-considerations)
+4. [Use Case: Talaria Integration](#4-use-case-talaria-integration)
+   - [Talaria's Current Event Flow](#41-talarias-current-event-flow)
+   - [Key Integration Points](#42-key-integration-points)
+5. [Dependencies](#5-dependencies)
+6. [Alternatives Considered](#6-alternatives-considered)
+7. [Implementation Phases](#7-implementation-phases)
+   - [Phase 1: Core Library Implementation](#71-phase-1-core-library-implementation)
+   - [Phase 2: Quality & Testing](#72-phase-2-quality--testing)
+   - [Phase 3: Integration & Performance](#73-phase-3-integration--performance)
+   - [Phase 4: Talaria Integration](#74-phase-4-talaria-integration)
+8. [Success Criteria](#8-success-criteria)
+   - [Library Quality](#81-library-quality)
+   - [Talaria Integration Success](#82-talaria-integration-success)
 
-### 2.1 Talaria's Current Event Flow
-1. **Device Events** → Devices generate events (Connect, Disconnect, MessageReceived) via WebSocket
-2. **Dispatcher Pattern** → `device.Listener` interface processes events through:
-   - `eventDispatcher`: Converts events to HTTP requests, queues them
-   - `ackDispatcher`: Handles QOS acknowledgments back to devices
-3. **WorkerPool** → Processes outbound HTTP request queue (100 workers default)
-4. **HTTP Transport** → Sends to configured endpoints (typically Caduceus)
+## 1. Library Architecture
 
-### 2.2 Key Integration Points
-- **Dispatcher interface**: Simple `device.Listener` interface with `OnDeviceEvent(*device.Event)` method
-  - Applications implement a thin adapter that extracts `wrp.Message` from `device.Event` and calls `Send()` or `Transfer()`
-  - The library works directly with `wrp.Message` for maximum flexibility
-  - Other applications can provide their own event sources
-- **Configuration pattern**: YAML-based configuration using goschtalt
-- **Metrics pattern**: Applications provide metrics via callback functions
+### 1.1 Design Principles
+- **Reusability**: Decoupled from specific applications, metrics, or logging frameworks
+- **Flexibility**: Supports multiple topic routing strategies (round-robin, device-based, metadata-based)
+- **Configuration-Driven**: YAML-based configuration for all routing and producer settings
+- **Observability**: Metrics via callback interface - works with any metrics backend
+- **Reliability**: Leverages franz-go's built-in retry, buffering, and compression
+- **Ordering Guarantees**: Per-device message ordering via partition keys
 
-## 3. Library Architecture
-
-### 3.1 Design Principles
-1. **Reusability**: Decoupled from specific applications, metrics, or logging frameworks
-2. **Flexibility**: Supports multiple topic routing strategies (round-robin, device-based, metadata-based)
-3. **Configuration-Driven**: YAML-based configuration for all routing and producer settings
-4. **Observability**: Metrics via callback interface - works with any metrics backend
-5. **Reliability**: Leverages franz-go's built-in retry, buffering, and compression
-6. **Ordering Guarantees**: Per-device message ordering via partition keys
-
-### 3.2 Component Design
+### 1.2 Component Design
 
 **Design Philosophy**: The library uses a functional options pattern:
-- **Configuration struct** (`Config`) for data loaded from YAML files (via goschtalt)
+- **Configuration struct** (`Config`) for data loaded from YAML files (via [goschtalt](https://github.com/goschtalt/goschtalt))
 - **Option functions** (`WithConfig`, `WithLogger`, `WithMessagesPublished`, etc.) for configuration and runtime dependencies
 - **Single `New()` constructor** that accepts variadic options
 
 This provides clean separation between configuration and runtime dependencies, with optional metric callbacks for observability.
 
-### 3.3 Quick Start Example
+### 1.3 Quick Start Example
 
 ```go
 package main
@@ -109,37 +128,118 @@ func main() {
     }
     defer dispatcher.Stop()
 
-    // Create a WRP message
+    // Create a WRP message with QoS
     msg := &wrp.Message{
-        Type:        wrp.SimpleEventMessageType,
-        Source:      "mac:112233445566",
-        Destination: "event:device-status/mac:112233445566",
+        Type:             wrp.SimpleEventMessageType,
+        Source:           "mac:112233445566",
+        Destination:      "event:device-status/mac:112233445566",
+        QualityOfService: 50, // Medium priority
         // ... other fields
     }
 
-    // Option 1: Async with callback, waits if buffer full (high throughput)
-    dispatcher.Produce(context.Background(), msg)
+    // Produce with QoS-aware routing
+    // QoS determines behavior automatically:
+    //   0-24: Fire-and-forget (drops if buffer full)
+    //   25-74: Async with automatic retries (waits if buffer full, franz-go retries)
+    //   75-99: Synchronous with confirmation
+    outcome, err := dispatcher.Produce(context.Background(), msg)
 
-    // Option 2: Async with callback, fails immediately if buffer full (non-blocking)
-    if err := dispatcher.TryProduce(context.Background(), msg); err != nil {
-        // Handle buffer full error
-    }
-
-    // Option 3: Sync with immediate acknowledgment (immediate feedback)
-    if err := dispatcher.ProduceSync(context.Background(), msg); err != nil {
-        // Handle error
+    switch outcome {
+    case wrpkafka.Accepted:
+        // Message confirmed by Kafka (QoS 75-99 only)
+        log.Info("critical message delivered")
+    case wrpkafka.Queued:
+        // Message buffered, async delivery (QoS 0-74)
+        log.Debug("message buffered for delivery")
+    case wrpkafka.Dropped:
+        // Low priority message dropped (QoS 0-24, buffer full)
+        log.Warn("low priority message dropped")
+    case wrpkafka.Failed:
+        // Critical message failed (QoS 75-99 only)
+        log.Error("critical message failed", zap.Error(err))
     }
 }
 ```
 
-### 3.4 Public API Surface
+### 1.4 Configuration Mutability and Hot-Reload
+
+The library supports runtime configuration updates for operational flexibility without requiring restarts.
+
+**Static Configuration (Requires Restart):**
+These fields affect the underlying [franz-go](https://github.com/twmb/franz-go) client and Kafka connections:
+- `Brokers` - Broker list, requires new connections
+- `SASL` - Authentication, requires reconnection
+- `TLS` - Encryption settings, requires reconnection
+- `MaxBufferedRecords` - Buffer allocation at startup
+- `RequestTimeout` - Client-level timeout configuration
+- `MaxRetries` - Client-level retry behavior
+
+**Dynamic Configuration (Hot-Reloadable):**
+These fields can be updated at runtime via `UpdateConfig()`:
+- `TopicMap` - Routing rules (patterns, topics, sharding strategies)
+- `Headers` - Kafka record headers
+- `CompressionCodec` - Compression algorithm
+- `Linger` - Batching delay
+- `Acks` - Acknowledgment requirements
+
+**Hot-Reload Example:**
+```go
+// Initial configuration from YAML
+dispatcher, err := wrpkafka.New(
+    wrpkafka.WithConfig(config),
+    wrpkafka.WithLogger(logger),
+)
+dispatcher.Start()
+
+// Later: Update routing without restart
+newDynamic := wrpkafka.DynamicConfig{
+    TopicMap: []wrpkafka.TopicRoute{
+        {Pattern: "online", Topic: "device-lifecycle-v2"},
+        {Pattern: "offline", Topic: "device-lifecycle-v2"},
+        {Pattern: "*", Topic: "device-events-v2"},
+    },
+    Headers:          config.Headers,
+    CompressionCodec: wrpkafka.CompressionSnappy,
+    Linger:           10 * time.Millisecond,
+    Acks:             wrpkafka.AcksAll,
+}
+
+if err := dispatcher.UpdateConfig(newDynamic); err != nil {
+    log.Error("config update failed", zap.Error(err))
+    return
+}
+// New Produce() calls immediately use the new configuration
+// In-flight messages complete with old configuration
+```
+
+**Benefits:**
+- **Operational flexibility**: Update routing, headers, compression without downtime
+- **Safe updates**: Validation occurs before applying changes
+- **Atomic**: Updates take effect immediately for new messages
+- **No disruption**: In-flight messages complete normally
+- **Thread-safe**: UpdateConfig() can be called concurrently with Produce()
+
+**Implementation Details:**
+- Uses `atomic.Pointer[DynamicConfig]` for lock-free reads during Produce()
+- Round-robin counters are reinitialized on TopicMap changes
+- Validation ensures configuration consistency before applying
+
+### 1.5 Public API Surface
 
 The library exports the following public types and functions:
 
 **Core Types:**
 - `Config` - Configuration struct (unmarshaled from YAML)
+- `DynamicConfig` - Runtime-updatable configuration subset
 - `TopicRoute` - Topic routing configuration
 - `Option` - Functional option type
+- `Outcome` - Enum describing message delivery outcome
+
+**Outcome Constants:**
+- `Accepted` - Message delivered and acknowledged by Kafka (QoS 75-99 only)
+- `Queued` - Message buffered but not confirmed (QoS 0-74)
+- `Dropped` - Message dropped due to buffer full (QoS 0-24 only)
+- `Failed` - Synchronous delivery failed (QoS 75-99 only)
 
 **Constructor & Options:**
 - `New(opts ...Option) (*Dispatcher, error)` - Main constructor
@@ -152,36 +252,130 @@ The library exports the following public types and functions:
 **Main Interface:**
 - `(*Dispatcher) Start() error` - Start the dispatcher and connect to Kafka
 - `(*Dispatcher) Stop()` - Stop the dispatcher and flush buffered messages
-- `(*Dispatcher) Produce(context.Context, *wrp.Message)` - Publish a WRP message to Kafka asynchronously with callback (thread-safe, waits if buffer full)
-- `(*Dispatcher) TryProduce(context.Context, *wrp.Message) error` - Publish a WRP message to Kafka asynchronously, returns error immediately if buffer full (thread-safe, non-blocking)
-- `(*Dispatcher) ProduceSync(context.Context, *wrp.Message) error` - Publish a WRP message to Kafka and wait for acknowledgment (thread-safe, blocking)
+- `(*Dispatcher) Produce(context.Context, *wrp.Message) (Outcome, error)` - Publish a WRP message with QoS-aware routing (thread-safe)
+- `(*Dispatcher) UpdateConfig(DynamicConfig) error` - Atomically update runtime configuration (thread-safe, takes effect immediately for new messages)
 - `(*Dispatcher) BufferedRecords() (current int, max int)` - Returns current buffered record count and max buffer size (thread-safe, zero overhead)
 
-### 3.5 Component Details
+### 1.5 Component Details
 
-#### 3.5.1 Config (Configuration)
+#### 1.5.1 Config (Configuration)
 ```go
 // Config contains all configuration loaded from YAML.
 // This struct contains only configuration data, no runtime dependencies.
+//
+// Configuration is divided into static and dynamic fields:
+// - Static fields (Brokers, SASL, TLS, MaxBufferedRecords, RequestTimeout, MaxRetries)
+//   can only be set at startup via WithConfig(). Changing these requires restart.
+// - Dynamic fields (TopicMap, Headers, CompressionCodec, Linger, Acks)
+//   can be updated at runtime via UpdateConfig(). See DynamicConfig type.
+//
+// Note: In actual implementation, each field will have full GoDoc comments
+// above the field definition following Go documentation best practices.
 type Config struct {
-    // Broker connection settings (applies to all brokers in the cluster)
-    Brokers           []string               // Kafka broker addresses (host:port format, e.g., "kafka-1:9092")
-    SASL              *sasl.Config           // Optional: SASL authentication from franz-go/pkg/sasl (same config for all brokers)
-    TLS               *tls.Config            // Optional: TLS encryption from crypto/tls (same config for all brokers)
+    // STATIC CONFIGURATION (requires restart to change)
 
-    // Routing settings
-    TopicMap          []TopicRoute           // Event type patterns mapped to target topics
-    Headers           map[string]string      // Optional: Kafka record headers - name -> "wrp.Field" or literal value
+    // Brokers is the list of Kafka broker addresses to connect to.
+    // Each address must be in "host:port" format.
+    // Example: []string{"kafka-1:9092", "kafka-2:9092", "kafka-3:9092"}
+    // STATIC: Changing requires restart
+    Brokers []string
 
-    // Producer performance settings
-    MaxBufferedRecords  int                  // Default: 0 (no buffering), <1 disables buffering
-    CompressionCodec    CompressionCodec     // Enum: snappy, gzip, lz4, zstd, none
-    Linger              time.Duration        // Default: 0 (no linger), <=0 is no linger
+    // SASL configures SASL authentication for broker connections.
+    // Optional. If nil, no authentication is used.
+    // Uses [franz-go](https://github.com/twmb/franz-go)'s sasl.Config from github.com/twmb/franz-go/pkg/sasl
+    // STATIC: Changing requires restart
+    SASL *sasl.Config
 
-    // Producer reliability settings
-    Acks                Acks                 // Enum: all, leader, none
-    MaxRetries          int                  // Default: 0 (unlimited retries), -1 (no retries), >0 (specific count)
-    RequestTimeout      time.Duration        // Default: 0 (no timeout), <=0 is no timeout
+    // TLS configures TLS encryption for broker connections.
+    // Optional. If nil, plaintext connections are used.
+    // Uses standard library crypto/tls.Config
+    // STATIC: Changing requires restart
+    TLS *tls.Config
+
+    // MaxBufferedRecords sets the maximum number of records to buffer in memory.
+    // Zero or negative values disable buffering.
+    // Default: 0 (no buffering)
+    // Higher values increase throughput at the cost of memory usage.
+    // STATIC: Changing requires restart
+    MaxBufferedRecords int
+
+    // RequestTimeout sets the maximum time to wait for broker responses.
+    // Zero or negative values mean no timeout.
+    // Default: 0 (no timeout)
+    // Example: 30*time.Second
+    // STATIC: Changing requires restart
+    RequestTimeout time.Duration
+
+    // MaxRetries controls retry behavior on broker failures.
+    // -1: No retries, fail immediately
+    // 0: Unlimited retries (default), retry until success or timeout
+    // >0: Retry up to this many times before failing
+    // Default: 0 (unlimited retries)
+    // STATIC: Changing requires restart
+    MaxRetries int
+
+    // DYNAMIC CONFIGURATION (can be updated via UpdateConfig)
+
+    // TopicMap defines routing rules from WRP event types to Kafka topics.
+    // Patterns are evaluated in order; first match wins.
+    // Must not be empty.
+    // DYNAMIC: Can be updated at runtime via UpdateConfig()
+    TopicMap []TopicRoute
+
+    // Headers defines additional Kafka record headers to include.
+    // Optional. Map keys are header names, values are either:
+    //   - Literal strings (e.g., "my-app-v1.0")
+    //   - WRP field references (e.g., "wrp.Source", "wrp.TransactionUUID")
+    // DYNAMIC: Can be updated at runtime via UpdateConfig()
+    Headers map[string]string
+
+    // CompressionCodec specifies the compression algorithm for message payloads.
+    // Valid values: "snappy", "gzip", "lz4", "zstd", "none"
+    // Default: "" (no compression)
+    // Snappy provides good compression with low CPU overhead.
+    // DYNAMIC: Can be updated at runtime via UpdateConfig()
+    CompressionCodec CompressionCodec
+
+    // Linger sets how long to wait for additional messages before sending a batch.
+    // Zero or negative values disable lingering (send immediately).
+    // Default: 0 (no linger)
+    // Example: 10*time.Millisecond trades latency for higher throughput
+    // DYNAMIC: Can be updated at runtime via UpdateConfig()
+    Linger time.Duration
+
+    // Acks controls the number of broker acknowledgments required.
+    // Valid values: "all" (all ISR replicas), "leader" (leader only), "none" (no acks)
+    // Default: "" (franz-go default, typically "all")
+    // "all" provides strongest durability guarantees.
+    // DYNAMIC: Can be updated at runtime via UpdateConfig()
+    Acks Acks
+}
+
+// DynamicConfig contains configuration fields that can be updated at runtime
+// without restarting the Dispatcher. Use UpdateConfig() to apply changes.
+type DynamicConfig struct {
+    // TopicMap defines routing rules from WRP event types to Kafka topics.
+    // Patterns are evaluated in order; first match wins.
+    // Must not be empty.
+    TopicMap []TopicRoute
+
+    // Headers defines additional Kafka record headers to include.
+    // Optional. Map keys are header names, values are either:
+    //   - Literal strings (e.g., "my-app-v1.0")
+    //   - WRP field references (e.g., "wrp.Source", "wrp.TransactionUUID")
+    Headers map[string]string
+
+    // CompressionCodec specifies the compression algorithm for message payloads.
+    // Valid values: "snappy", "gzip", "lz4", "zstd", "none"
+    CompressionCodec CompressionCodec
+
+    // Linger sets how long to wait for additional messages before sending a batch.
+    // Zero or negative values disable lingering (send immediately).
+    Linger time.Duration
+
+    // Acks controls the number of broker acknowledgments required.
+    // Valid values: "all" (all ISR replicas), "leader" (leader only), "none" (no acks)
+    Acks Acks
 }
 
 type CompressionCodec string
@@ -207,22 +401,25 @@ type TopicRoute struct {
     IgnoreCase  bool                         // If true, pattern matching is case-insensitive
     Topic       string                       // Single target topic (mutually exclusive with Topics)
     Topics      []string                     // Multiple target topics (mutually exclusive with Topic)
-    ShardBy     string                       // "roundrobin", "metadata:<fieldname>", "deviceid", or empty (only valid with Topics)
+    ShardBy     string                       // `"roundrobin"`, `"metadata:<fieldname>"`, `"deviceid"`, or empty (only valid with Topics)
 
     // Internal state (initialized during New(), not from config)
-    roundRobinCounter *atomic.Uint64         // Counter for round-robin distribution (only used when ShardBy="roundrobin")
+    roundRobinCounter *atomic.Uint64         // Counter for round-robin distribution (only used when `ShardBy="roundrobin"`)
 }
 ```
 
-#### 3.5.2 Dispatcher
+#### 1.5.2 Dispatcher
 
 The main type that publishes events to Kafka:
 
 ```go
 type Dispatcher struct {
-    config              Config
-    logger              *zap.Logger
+    // Static configuration (immutable after New())
     client              *kgo.Client
+    logger              *zap.Logger
+
+    // Dynamic configuration (atomic access)
+    dynamicConfig       atomic.Pointer[DynamicConfig]
 
     // Optional metric callbacks (nil-safe)
     messagesPublished   func(eventType, topic, shardStrategy string)
@@ -255,31 +452,44 @@ func (d *Dispatcher) Start() error
 // Blocks until all buffered messages are sent or timeout occurs.
 func (d *Dispatcher) Stop()
 
-// Produce publishes a WRP message to Kafka asynchronously with callback.
-// Thread-safe. If buffer is full, waits until space is available.
-// Errors are reported via the messageErrored callback, not returned.
-// Maps to franz-go's Produce() method.
-// Use this for high-throughput scenarios where immediate feedback is not required.
-func (d *Dispatcher) Produce(ctx context.Context, msg *wrp.Message)
-
-// TryProduce publishes a WRP message to Kafka asynchronously with callback.
-// Thread-safe and non-blocking. Returns error immediately if buffer is full.
-// Errors are reported via the messageErrored callback AND returned if buffer full.
-// Maps to franz-go's TryProduce() method.
-// Use this when you want async behavior but need to know if buffer is full.
-func (d *Dispatcher) TryProduce(ctx context.Context, msg *wrp.Message) error
-
-// ProduceSync publishes a WRP message to Kafka synchronously and waits for acknowledgment.
-// Thread-safe but blocking. Returns error if publish fails.
-// Maps to franz-go's ProduceSync() method.
-// Use this when you need immediate confirmation of success/failure.
-func (d *Dispatcher) ProduceSync(ctx context.Context, msg *wrp.Message) error
+// Produce publishes a WRP message to Kafka. The message is processed according
+// to its QualityOfService field, which determines the routing strategy and
+// delivery guarantees. Depending on the QoS level, the method may block until
+// the message is accepted or dropped. The outcome of the operation is returned
+// as an Outcome enum, along with any error for critical failures.
+//
+// QoS-aware routing:
+//   - 0-24 (Low): Fire-and-forget via TryProduce, drops if buffer full
+//   - 25-74 (Medium/High): Async delivery via Produce, waits if buffer full
+//   - 75-99 (Critical): Synchronous via ProduceSync, waits for ack
+//
+// Returns:
+//   - Outcome: What happened (Accepted, Queued, Dropped, Failed)
+//   - error: Non-nil only for QoS 75-99 synchronous failures
+func (d *Dispatcher) Produce(ctx context.Context, msg *wrp.Message) (Outcome, error)
 
 // BufferedRecords returns the current and maximum buffered record counts.
 // Thread-safe. Zero overhead - simply calls franz-go's client.BufferedProduceRecords().
 // Returns (0, 0) if MaxBufferedRecords is 0 (buffering disabled).
 // Application can calculate utilization as: float64(current) / float64(max)
 func (d *Dispatcher) BufferedRecords() (current int, max int)
+
+// UpdateConfig atomically updates the dynamic configuration.
+// The update takes effect immediately for new Produce() calls.
+// In-flight messages continue using the previous configuration.
+//
+// This method validates the new configuration before applying it:
+//   - TopicMap must not be empty
+//   - All patterns must follow simplified syntax
+//   - TopicRoute combinations must be valid
+//   - ShardBy values must be valid
+//   - CompressionCodec and Acks must be valid enum values
+//
+// Round-robin counters are initialized for new routes with ShardBy="roundrobin".
+// Note: Existing routes that match the old config will reset their counters.
+//
+// Thread-safe: Can be called concurrently with Produce().
+func (d *Dispatcher) UpdateConfig(next DynamicConfig) error
 
 // Key methods (simplified - implementation details omitted):
 // - getEventType: Extracts event type from WRP Destination
@@ -292,23 +502,24 @@ func (d *Dispatcher) BufferedRecords() (current int, max int)
 
 **Responsibilities**:
 - Convert `wrp.Message` to Kafka records
-- Extract event type from WRP Destination field (event-type portion only, see wrp-go for details)
+- Extract event type from WRP Destination field (event-type portion only, see [wrp-go](https://github.com/xmidt-org/wrp-go) for details)
 - Match event type to TopicRoute using glob patterns (configured order, first match wins)
 - Select specific topic from route's Topics list based on ShardBy strategy
-- Extract device ID for partition key (ensures ordering per device, see wrp-go for Source field format)
-- Extract configured headers from WRP message (see wrp-go for field definitions)
+- Extract device ID for partition key (ensures ordering per device, see [wrp-go](https://github.com/xmidt-org/wrp-go) for Source field format)
+- Extract configured headers from WRP message (see [wrp-go](https://github.com/xmidt-org/wrp-go) for field definitions)
 - Encode WRP messages (msgpack format)
-- **Produce()**: Publish asynchronously with callbacks, waits if buffer full, errors reported via messageErrored callback
-- **TryProduce()**: Publish asynchronously with callbacks, returns error if buffer full (non-blocking)
-- **ProduceSync()**: Publish synchronously and return error on failure
+- **Produce()**: QoS-aware routing - inspects msg.QualityOfService and routes to appropriate [franz-go](https://github.com/twmb/franz-go) method
+  - QoS 0-24: Uses TryProduce (drops if buffer full, returns Dropped)
+  - QoS 25-74: Uses Produce (waits if buffer full, returns Queued)
+  - QoS 75-99: Uses ProduceSync (waits for ack, returns Accepted/Failed)
 - Record metrics for successes/failures (nil-safe - checks before invoking callbacks)
-- Thread-safe: All production methods can be called concurrently from multiple goroutines
+- Thread-safe: Produce() method can be called concurrently from multiple goroutines
 
 **Initialization**:
 - TopicMap order is preserved as configured (first match wins)
-- Validates all glob patterns at startup using `filepath.Match`
-- Validates ShardBy values at startup (must be "", "roundrobin", "deviceid", or "metadata:<field>")
-- Initializes `roundRobinCounter` on each TopicRoute where ShardBy="roundrobin" (eliminates map lookup overhead)
+- Validates all patterns at startup (must follow simplified pattern syntax)
+- Validates ShardBy values at startup (must be `""`, `"roundrobin"`, `"deviceid"`, or `"metadata:<field>"`)
+- Initializes `roundRobinCounter` on each TopicRoute where `ShardBy="roundrobin"` (eliminates map lookup overhead)
 - Stores headers config as-is (processed at message publish time)
 
 **Validation Rules** (checked by `validate()` function in `New()`):
@@ -320,11 +531,11 @@ func (d *Dispatcher) BufferedRecords() (current int, max int)
 
 2. **TopicRoute Validation** (for each route):
    - `Pattern` must be non-empty
-   - Pattern must be valid for `filepath.Match`
+   - Pattern must follow simplified syntax (exact match, `*`, prefix with trailing `*`, or escaped `\*`)
    - Exactly one of the following two combinations:
      - **Single topic**: `Topic` set, `Topics` empty, `ShardBy` empty
      - **Multi-topic**: `Topics` set and non-empty, `Topic` empty, `ShardBy` set
-   - `ShardBy` (when used) must be one of: "roundrobin", "deviceid", or "metadata:<fieldname>"
+   - `ShardBy` (when used) must be one of: `"roundrobin"`, `"deviceid"`, or `"metadata:<fieldname>"`
    - If `ShardBy` is set, `Topics` must have at least 1 topic
 
 3. **Enum Validation**:
@@ -344,7 +555,7 @@ func (d *Dispatcher) BufferedRecords() (current int, max int)
 
 After validation passes, `New()` initializes round-robin counters on routes where applicable.
 
-### 3.6 Message Format
+### 1.6 Message Format
 
 **Kafka Record Structure**:
 ```
@@ -375,7 +586,7 @@ headers:
 - **WRP field extraction**: Use `"wrp.FieldName"` to extract fields from the WRP message
 - **Metadata tagging**: Add literal strings for environment, region, version, etc.
 
-### 3.7 WRP Event Processing
+### 1.7 WRP Event Processing
 
 This library processes WRP (Web Routing Protocol) events. For complete details on WRP message structure, fields, and formats, see the [wrp-go documentation](https://github.com/xmidt-org/wrp-go) and [xmidt.io](https://xmidt.io).
 
@@ -393,7 +604,7 @@ See the wrp-go repository for:
 - Metadata structure and field types
 - WRP message type enumeration
 
-### 3.8 Topic Selection Strategies
+### 1.8 Topic Selection Strategies
 
 When a TopicRoute matches an event, a specific topic must be selected. The `Topic` and `Topics` fields are mutually exclusive:
 
@@ -456,13 +667,13 @@ When a TopicRoute matches an event, a specific topic must be selected. The `Topi
   1. **Pattern is set, Topic is set, everything else is empty** (single topic route)
   2. **Pattern is set, Topics is set, ShardBy is set, Topic is empty** (multi-topic route with sharding)
 - All other combinations are invalid and cause startup failure
-- `ShardBy` must be one of: "roundrobin", "deviceid", or "metadata:<fieldname>" (when used with Topics)
+- `ShardBy` must be one of: `"roundrobin"`, `"deviceid"`, or `"metadata:<fieldname>"` (when used with Topics)
 - Invalid `ShardBy` values cause startup failure
 - Metadata field names are not validated at startup (runtime fallback to round-robin)
 - `CompressionCodec` must be one of the defined enum values
 - `Acks` must be one of the defined enum values
 
-### 3.9 Partitioning
+### 1.9 Partitioning
 
 Messages are always partitioned by device ID. This provides:
 - **Ordering**: All events for a given device go to the same partition, preserving event order per device
@@ -470,7 +681,7 @@ Messages are always partitioned by device ID. This provides:
 - **Flexibility**: Consumers can process events with or without state, with ordering guarantees when needed
 
 **Partition Assignment**:
-- Franz-go uses Kafka's default partitioner: `hash(device_id) % num_partitions`
+- [franz-go](https://github.com/twmb/franz-go) uses Kafka's default partitioner: `hash(device_id) % num_partitions`
 - Consistent hashing ensures the same device always goes to the same partition
 - No configuration needed - automatic and deterministic
 
@@ -479,7 +690,7 @@ Messages are always partitioned by device ID. This provides:
 - Partition assignment happens second - chooses which partition within that topic
 - Both use device ID by default, providing consistent routing at both levels
 
-### 3.10 Topic Matching with Glob Patterns
+### 1.10 Topic Matching with Pattern Matching
 
 **Event Type Extraction**:
 - The event type for pattern matching is extracted from the **event-type field** of `wrp.Destination`
@@ -487,19 +698,40 @@ Messages are always partitioned by device ID. This provides:
 - For example, `event:device-status/mac:112233445566` → event type is `device-status`
 - For Connect/Disconnect events, the event type is `online` or `offline`
 
-**Pattern Matching**:
-- Uses Go standard library `path/filepath.Match` syntax:
-  - `*` - matches any sequence of characters
-  - `?` - matches any single character
-  - `[abc]` - character class
-  - `[a-z]` - character range
-  - `[!abc]` - negated character class
+**Pattern Matching Rules**:
+The library supports a simplified pattern matching syntax optimized for performance:
+
+1. **Catch-all pattern**: `*` matches any event type
+2. **Exact match**: Pattern must equal event type exactly (case-sensitive)
+3. **Prefix match**: Pattern ending with `*` matches event types starting with that prefix
+   - Example: `device-status-*` matches `device-status-update`, `device-status-battery`, etc.
+   - Only the final character can be `*` (wildcard in middle or beginning is not supported)
+4. **Escaped asterisk**: Use `\*` to match a literal `*` character in the event type
+   - Example: `foo\*` matches exactly `foo*` (not a wildcard)
+   - Example: `foo-\*-bar` matches exactly `foo-*-bar`
+
+**Important Validation Notes**:
+- Patterns with `*` in the middle or beginning (e.g., `foo-*-bar`, `*-suffix`) **will fail validation**
+- To match event types containing literal `*` characters, use `\*` escape sequence
+- This restriction reserves future design space for additional matching features while maintaining backwards compatibility
+
+**Pattern Matching Behavior**:
 - **Case Sensitivity**: All pattern matching is case-sensitive by default
   - Set `ignoreCase: true` on a route to enable case-insensitive matching for that pattern
   - When `ignoreCase: true`, both pattern and event type are lowercased before matching
 - Patterns evaluated in configured order
 - First match wins
 - No match = error (dropped message + metric)
+
+**Performance Characteristics**:
+This simplified pattern matching is optimized for high-throughput message routing:
+- Catch-all (`*`): ~2 ns/op
+- Exact match: ~2 ns/op
+- Prefix match (`foo-*`): ~4 ns/op
+- **30x faster** than `filepath.Match` (~130 ns/op)
+- **100x faster** than compiled regexp (~450 ns/op)
+
+(Benchmarked on AMD Ryzen 9 3900X 12-Core Processor; see [pattern_bench_test.go](../pattern_bench_test.go) for details)
 
 **Example Configuration**:
 ```yaml
@@ -537,23 +769,24 @@ topicMap:
 - Each route must match one of two valid combinations:
   1. `Pattern` set, `Topic` set, everything else empty/default (single topic route)
   2. `Pattern` set, `Topics` set, `ShardBy` set, `Topic` empty (multi-topic route)
-- Invalid glob patterns are detected at startup using `filepath.Match` validation
-- `ShardBy` must be one of: "roundrobin", "deviceid", or "metadata:<fieldname>" (when Topics is used)
+- Invalid patterns are detected at startup (must follow simplified pattern syntax)
+- `ShardBy` must be one of: `"roundrobin"`, `"deviceid"`, or `"metadata:<fieldname>"` (when Topics is used)
 - `Headers` map is optional (empty map is valid)
 - Header values starting with `wrp.` reference WRP message fields (see [wrp-go documentation](https://github.com/xmidt-org/wrp-go))
 - `CompressionCodec` must be one of the defined enum values
 - `Acks` must be one of the defined enum values
 
-### 3.11 franz-go Promise Callback Pattern
+### 1.11 franz-go Promise Callback Pattern
 
-The Produce() and TryProduce() methods use franz-go's promise callback pattern for asynchronous result notification.
+The Produce() method uses [franz-go](https://github.com/twmb/franz-go)'s promise callback pattern for asynchronous result notification (for QoS 0-74 messages).
 
 **Promise Callback Signature**: `func(*kgo.Record, error)`
 
 **When Called**:
 - After the Kafka broker responds (success or failure)
-- Asynchronously in franz-go's internal goroutines
-- NOT during the Produce/TryProduce call itself
+- Asynchronously in franz-go's internal goroutines (for QoS 0-74)
+- NOT during the Produce() call itself
+- For QoS 75-99, result is returned synchronously (no callback)
 
 **Callback Parameters**:
 - **`*kgo.Record`**: The same Record object you passed, updated with broker metadata:
@@ -565,14 +798,15 @@ The Produce() and TryProduce() methods use franz-go's promise callback pattern f
   - Non-nil if failed (timeout, retries exhausted, broker error, etc.)
 
 **Important Constraints**:
-- Executes in franz-go's internal goroutines (must be thread-safe)
+- Executes in [franz-go](https://github.com/twmb/franz-go)'s internal goroutines (must be thread-safe)
 - Should NOT perform long-running operations (blocks other record processing)
 - Keep callback logic lightweight (metrics, logging, channel sends)
 
 **How wrpkafka Uses Promises**:
-- Produce() and TryProduce() pass a callback to franz-go's methods
+- For QoS 0-24 and 25-74: Passes callback to [franz-go](https://github.com/twmb/franz-go)'s TryProduce/Produce methods
 - Callback invokes application's `messageErrored` or `messagesPublished` metrics
 - Callback tracks latency (start to broker ack)
+- For QoS 75-99: Uses ProduceSync, no callback (result returned synchronously)
 - All application callbacks must be thread-safe
 
 **Buffer Utilization Tracking via On-Demand Method**:
@@ -583,14 +817,14 @@ Instead of callbacks and background polling, buffer state is exposed via a simpl
 - `BufferedRecords() (current int, max int)` - Returns current buffered count and max buffer size
 
 **Implementation**:
-- Simply calls franz-go's `client.BufferedProduceRecords()` for current count
+- Simply calls [franz-go](https://github.com/twmb/franz-go)'s `client.BufferedProduceRecords()` for current count
 - Returns configured `MaxBufferedRecords` as max
 - Zero overhead - no background goroutines, no callbacks
 - Thread-safe - can be called concurrently
 
 **Application Integration Options**:
 
-**Option 1: Prometheus GaugeFunc** (simplest):
+**Option 1: [Prometheus](https://prometheus.io/) GaugeFunc** (simplest):
 ```go
 bufferUtilization := prometheus.NewGaugeFunc(
     prometheus.GaugeOpts{
@@ -607,7 +841,7 @@ bufferUtilization := prometheus.NewGaugeFunc(
 )
 ```
 
-**Option 2: Prometheus Collector** (for multiple metrics):
+**Option 2: [Prometheus](https://prometheus.io/) Collector** (for multiple metrics):
 ```go
 type bufferCollector struct {
     dispatcher *wrpkafka.Dispatcher
@@ -670,90 +904,104 @@ if max > 0 && float64(current)/float64(max) > 0.9 {
 - Can report raw count AND utilization percentage
 - Simpler implementation
 
-### 3.12 Production Methods: Usage Patterns
+### 1.12 WRP QoS-Aware Message Production
 
-The library provides three methods for publishing WRP messages to Kafka, aligning with franz-go's API:
+The library provides a single `Produce()` method that automatically routes messages based on their WRP QualityOfService field. This aligns with [WRP QoS semantics](https://xmidt.io/docs/wrp/basics/#qos-description-qos) and provides explicit outcome feedback.
 
-#### Produce() - Asynchronous with Buffering
+#### QoS Routing Behavior
 
-**Characteristics**:
-- Non-blocking callback-based, returns immediately
-- If buffer is full, **waits** until space is available (backpressure)
-- High throughput, messages buffered and sent asynchronously
-- Errors reported via `messageErrored` callback, not returned
-- Metrics recorded via callback functions
-- Maps to franz-go's `Produce()` method
+**QoS 0-24 (Low Priority - "Fire and forget"):**
+- Uses [franz-go](https://github.com/twmb/franz-go)'s `TryProduce()` internally
+- Returns immediately, never blocks caller
+- If buffer full: returns `Dropped` with `nil` error
+- If accepted: returns `Queued` with `nil` error
+- Async delivery failures reported via `messageErrored` callback
+- **Use case**: Best-effort telemetry, non-critical events
 
-**When to Use**:
-- High-throughput scenarios where immediate feedback is not required
-- Event logging, metrics, telemetry streams
-- Can tolerate brief blocking if buffer fills
-- Talaria's existing event flow (async by nature)
+**QoS 25-74 (Medium/High Priority - "Enqueue and confirm"):**
+- Uses [franz-go](https://github.com/twmb/franz-go)'s `Produce()` internally
+- Waits if buffer full (backpressure)
+- Returns `Queued` with `nil` error
+- Async delivery with automatic retries until success ([franz-go](https://github.com/twmb/franz-go) retries internally)
+- Success/failure reported via callbacks
+- **Use case**: Standard device events, metrics
 
-**Example**:
+**QoS 75-99 (Critical Priority - "Any means necessary"):**
+- Uses [franz-go](https://github.com/twmb/franz-go)'s `ProduceSync()` internally
+- Blocks until Kafka broker acknowledges receipt
+- On success: returns `Accepted` with `nil` error
+- On failure: returns `Failed` with non-nil error
+- Also reports via callbacks for metrics consistency
+- **Use case**: Critical alerts, compliance events, audit logs
+
+#### Outcome Types
+
 ```go
-// High throughput - buffers and batches, waits if buffer full
-dispatcher.Produce(ctx, msg)
+type Outcome int
+
+const (
+    // Accepted - Message delivered AND confirmed by Kafka
+    // Only returned for QoS 75-99 that successfully complete
+    Accepted Outcome = iota
+
+    // Queued - Message buffered but NOT confirmed
+    // For QoS 0-24: Fire-and-forget, may fail async
+    // For QoS 25-74: Will retry async, callback on result
+    Queued
+
+    // Dropped - Message dropped due to buffer full
+    // Only for QoS 0-24 when buffer is at capacity
+    Dropped
+
+    // Failed - Synchronous delivery failed
+    // Only for QoS 75-99 when Kafka rejects or times out
+    Failed
+)
 ```
 
-#### TryProduce() - Asynchronous Non-Blocking
+#### Usage Example
 
-**Characteristics**:
-- Non-blocking callback-based, returns immediately
-- If buffer is full, **fails immediately** with error (no waiting)
-- Returns error only for buffer-full condition
-- Other errors reported via `messageErrored` callback
-- Maps to franz-go's `TryProduce()` method
-
-**When to Use**:
-- High-throughput scenarios that must never block
-- Need to detect backpressure/buffer full conditions
-- Can handle dropped messages or implement custom retry logic
-- Real-time systems with strict latency requirements
-
-**Example**:
 ```go
-// Non-blocking - fails fast if buffer full
-if err := dispatcher.TryProduce(ctx, msg); err != nil {
-    // err is only ErrMaxBuffered, handle backpressure
-    log.Warn("buffer full, dropping message")
+outcome, err := dispatcher.Produce(ctx, msg)
+
+switch outcome {
+case wrpkafka.Accepted:
+    // QoS 75-99 only - delivery guaranteed
+    logger.Info("critical message confirmed by Kafka",
+        zap.String("device", msg.Source))
+
+case wrpkafka.Queued:
+    // QoS 0-74 - buffered but not yet confirmed
+    // For QoS 0-24: fire-and-forget (may fail silently)
+    // For QoS 25-74: async retry until success
+    logger.Debug("message buffered",
+        zap.Int("qos", msg.QualityOfService))
+
+case wrpkafka.Dropped:
+    // QoS 0-24 only - buffer was full
+    logger.Warn("low priority message dropped",
+        zap.String("device", msg.Source))
+    droppedMessagesCounter.Inc()
+
+case wrpkafka.Failed:
+    // QoS 75-99 only - sync delivery failed
+    logger.Error("critical message delivery failed",
+        zap.Error(err),
+        zap.String("device", msg.Source))
+    // Consider alternative delivery mechanism
+    fallbackDelivery(msg)
 }
 ```
 
-#### ProduceSync() - Synchronous with Acknowledgment
+#### Performance Characteristics
 
-**Characteristics**:
-- Blocking, waits for Kafka broker acknowledgment
-- Returns error immediately if publish fails
-- Lower throughput due to synchronous nature
-- Provides immediate success/failure feedback
-- Still thread-safe, can be called concurrently
-- Maps to franz-go's `ProduceSync()` method
+- **QoS 0-24**: Highest throughput, never blocks, may drop under load
+- **QoS 25-74**: High throughput via batching, brief blocking if buffer full
+- **QoS 75-99**: Lower throughput due to synchronous confirmation
+- Thread-safe: can be called concurrently from multiple goroutines
+- [franz-go](https://github.com/twmb/franz-go) handles batching and optimization automatically
 
-**When to Use**:
-- Critical messages where confirmation is required
-- Request/response patterns
-- User-facing operations where error feedback is needed
-- Lower-volume, higher-reliability scenarios
-
-**Example**:
-```go
-// Wait for broker confirmation
-if err := dispatcher.ProduceSync(ctx, msg); err != nil {
-    log.Error("failed to publish", zap.Error(err))
-    // Handle error, retry, etc.
-}
-```
-
-#### Performance Considerations
-
-- **Produce()**: Highest throughput via batching, may briefly block if buffer fills
-- **TryProduce()**: High throughput, never blocks, may drop messages if buffer full
-- **ProduceSync()**: Each call waits for broker ack, lowest throughput
-- All methods can be used concurrently from multiple goroutines
-- franz-go handles batching and optimization internally
-
-### 3.13 Integration Example (Talaria)
+### 1.13 Integration Example (Talaria)
 
 This shows how to integrate the library into Talaria's existing dispatcher pattern. Other applications would follow similar patterns adapted to their architectures.
 
@@ -773,18 +1021,33 @@ func (k *kafkaAdapter) OnDeviceEvent(event *device.Event) {
         return
     }
 
-    // Option 1: Use Produce() for high throughput (waits if buffer full)
-    k.dispatcher.Produce(context.Background(), event.Message)
+    // Produce with QoS-aware routing (library handles QoS automatically)
+    outcome, err := k.dispatcher.Produce(context.Background(), event.Message)
 
-    // Option 2: Use TryProduce() if you can't tolerate blocking
-    // if err := k.dispatcher.TryProduce(context.Background(), event.Message); err != nil {
-    //     k.logger.Warn("buffer full, message dropped", zap.Error(err))
-    // }
+    // Handle outcome based on application needs
+    switch outcome {
+    case wrpkafka.Accepted:
+        // Critical message confirmed - QoS 75-99
+        k.logger.Debug("critical message confirmed",
+            zap.String("device", event.Device.ID()))
 
-    // Option 3: Use ProduceSync() if you need immediate error feedback
-    // if err := k.dispatcher.ProduceSync(context.Background(), event.Message); err != nil {
-    //     k.logger.Error("failed to publish message", zap.Error(err))
-    // }
+    case wrpkafka.Queued:
+        // Standard/low priority buffered - QoS 0-74
+        // No action needed - async callbacks handle metrics
+
+    case wrpkafka.Dropped:
+        // Low priority dropped due to backpressure - QoS 0-24
+        k.logger.Warn("low priority message dropped",
+            zap.String("device", event.Device.ID()),
+            zap.Int("qos", event.Message.QualityOfService))
+
+    case wrpkafka.Failed:
+        // Critical message failed - QoS 75-99
+        k.logger.Error("critical message delivery failed",
+            zap.Error(err),
+            zap.String("device", event.Device.ID()))
+        // Could trigger alternative delivery mechanism here
+    }
 }
 ```
 
@@ -826,7 +1089,14 @@ func (o *Outbounder) Start(om OutboundMeasures) ([]device.Listener, error) {
         if err := kafkaDispatcher.Start(); err != nil {
             return nil, err
         }
-        // TODO: Add shutdown hook to call kafkaDispatcher.Stop()
+
+        // Register shutdown hook to flush buffered messages on graceful shutdown
+        lc.Append(fx.Hook{
+            OnStop: func(ctx context.Context) error {
+                kafkaDispatcher.Stop() // Blocks until messages flushed or timeout
+                return nil
+            },
+        })
 
         // Wrap in adapter to implement device.Listener
         adapter := &kafkaAdapter{
@@ -844,7 +1114,7 @@ func (o *Outbounder) Start(om OutboundMeasures) ([]device.Listener, error) {
 }
 ```
 
-**Configuration Loading** (using goschtalt):
+**Configuration Loading** (using [goschtalt](https://github.com/goschtalt/goschtalt)):
 ```go
 var kafkaConfig kafka.Config
 if err := v.Unmarshal("device.outbound.kafka", &kafkaConfig); err != nil {
@@ -852,7 +1122,7 @@ if err := v.Unmarshal("device.outbound.kafka", &kafkaConfig); err != nil {
 }
 ```
 
-### 3.14 Configuration Schema
+### 1.14 Configuration Schema
 ```yaml
 device:
   outbound:
@@ -884,8 +1154,9 @@ device:
       #   enabled: true
       #   caFile: /etc/talaria/kafka-ca.pem
 
-      # Routing: Map event patterns to topics (filepath.Match glob patterns)
+      # Routing: Map event patterns to topics (simplified pattern syntax)
       # Evaluated in order - first match wins
+      # Pattern syntax: exact match, "*" (catch-all), "prefix-*" (prefix match), or "foo\*" (escaped asterisk)
       # Note: event type is extracted from wrp.Destination event-type field (before first /)
       topicMap:
         # Single topic examples - use topic field (not topics/shardBy)
@@ -935,11 +1206,11 @@ device:
       # requestTimeout: 0       # Default: 0 (no timeout), <=0 is no timeout
 ```
 
-### 3.15 Metrics
+### 1.15 Metrics
 
-The library is decoupled from Prometheus through optional metric callback functions. Applications integrate by creating Prometheus metrics and passing them as options.
+The library is decoupled from [Prometheus](https://prometheus.io/) through optional metric callback functions. Applications integrate by creating [Prometheus](https://prometheus.io/) metrics and passing them as options.
 
-**Example Prometheus Integration**:
+**Example [Prometheus](https://prometheus.io/) Integration**:
 
 ```go
 // Define Prometheus metrics
@@ -974,44 +1245,41 @@ var (
 **Metric Labels**:
 - `event_type`: online, offline, message
 - `topic`: Selected Kafka topic name (after sharding)
-- `shard_strategy`: roundrobin, deviceid, metadata, single (for observability of routing)
-- `error_type`: For failures (timeout, buffer_full, encoding_error, header_extraction_error, missing_metadata_field, etc.)
+- `shard_strategy`: `"roundrobin"`, `"deviceid"`, `"metadata"`, `"single"` (for observability of routing)
+- `error_type`: For failures (`"timeout"`, `"buffer_full"`, `"encoding_error"`, `"header_extraction_error"`, `"missing_metadata_field"`, etc.)
 
 **Callback Invocation Details**:
 
 **messagesPublished(eventType, topic, shardStrategy)**:
 - **When**: Invoked after Kafka broker acknowledges successful write
-- **Produce()**: Invoked asynchronously in franz-go callback when broker acks
-- **TryProduce()**: Invoked asynchronously in franz-go callback when broker acks
-- **ProduceSync()**: Invoked synchronously before returning (after broker acks)
+- **QoS 0-74**: Invoked asynchronously in franz-go callback when broker acks
+- **QoS 75-99**: Invoked synchronously before returning (after broker acks)
 - **Thread**: May be invoked from internal franz-go goroutines (must be thread-safe)
 - **Frequency**: Once per successfully published message
 
 **messageErrored(eventType, topic, shardStrategy, errorType)**:
 - **When**: Invoked when message publishing fails (any stage: encoding, routing, broker error)
-- **Produce()**: Invoked asynchronously in franz-go callback or immediately for pre-publish errors (encoding, no route match)
-- **TryProduce()**: Not invoked for buffer_full (returned as error); invoked for other failures in franz-go callback
-- **ProduceSync()**: Invoked in addition to returning error (for metrics tracking)
+- **QoS 0-74**: Invoked asynchronously in franz-go callback or immediately for pre-publish errors
+- **QoS 75-99**: Invoked in addition to returning error (for metrics tracking)
 - **Thread**: May be invoked from internal franz-go goroutines (must be thread-safe)
 - **Frequency**: Once per failed message
 - **Error Types**:
-  - `encoding_error`: msgpack encoding failed
-  - `no_topic_match`: No TopicRoute matched event type
-  - `buffer_full`: Buffer capacity exceeded (Produce only, TryProduce returns error)
-  - `broker_error`: Kafka broker rejected message
-  - `timeout`: Request timeout exceeded
-  - `missing_metadata_field`: Metadata field for sharding not found (falls back to round-robin, informational)
+  - `"encoding_error"`: msgpack encoding failed
+  - `"no_topic_match"`: No TopicRoute matched event type
+  - `"buffer_full"`: Buffer capacity exceeded (QoS 0-24 only, returns Dropped outcome)
+  - `"broker_error"`: Kafka broker rejected message
+  - `"timeout"`: Request timeout exceeded
+  - `"missing_metadata_field"`: Metadata field for sharding not found (falls back to round-robin, informational)
 
 **publishLatency(eventType, topic, shardStrategy, duration)**:
 - **When**: Invoked after message publish completes (success or failure)
 - **Measurement**: From method call to Kafka broker acknowledgment
-  - Start: When Produce()/TryProduce()/ProduceSync() is called
+  - Start: When Produce() is called
   - End: When Kafka broker acknowledges write (or error occurs)
-- **Produce()**: Invoked asynchronously in franz-go callback
-- **TryProduce()**: Invoked asynchronously in franz-go callback (not invoked if buffer full)
-- **ProduceSync()**: Invoked synchronously before returning
+- **QoS 0-74**: Invoked asynchronously in franz-go callback
+- **QoS 75-99**: Invoked synchronously before returning
 - **Thread**: May be invoked from internal franz-go goroutines (must be thread-safe)
-- **Frequency**: Once per message (successful or failed, except TryProduce buffer-full)
+- **Frequency**: Once per message (successful or failed, except QoS 0-24 buffer-full)
 - **Duration**: Includes encoding, routing, network latency, and broker processing time
 
 **Buffer State via On-Demand Method**:
@@ -1052,7 +1320,7 @@ bufferCount := prometheus.NewGaugeFunc(
 ```
 
 **Return Values**:
-- `current`: Number of records currently buffered (from franz-go's `client.BufferedProduceRecords()`)
+- `current`: Number of records currently buffered (from [franz-go](https://github.com/twmb/franz-go)'s `client.BufferedProduceRecords()`)
 - `max`: Configured `MaxBufferedRecords` value
 - Returns `(0, 0)` if buffering disabled (`MaxBufferedRecords` = 0)
 - Utilization calculation: `float64(current) / float64(max)`
@@ -1060,7 +1328,7 @@ bufferCount := prometheus.NewGaugeFunc(
 **Examples**:
 - `(0, 10000)`: Buffer empty
 - `(5000, 10000)`: Buffer 50% full (utilization = 0.5)
-- `(10000, 10000)`: Buffer full (utilization = 1.0, Produce waits, TryProduce fails)
+- `(10000, 10000)`: Buffer full (utilization = 1.0, QoS 25-74 wait, QoS 0-24 drop)
 - `(0, 0)`: Buffering disabled
 
 **Benefits**:
@@ -1072,57 +1340,57 @@ bufferCount := prometheus.NewGaugeFunc(
 - Called on-demand (e.g., during Prometheus scrape)
 - Only relevant when `MaxBufferedRecords > 0` (buffering enabled)
 
-### 3.16 Error Handling
+### 1.16 Error Handling
 
-Error handling differs between the three production methods:
+Error handling is QoS-aware based on the message's QualityOfService field:
 
-#### Produce() Error Handling (Asynchronous with Backpressure)
-- **Encoding Failures**: Log error, invoke `messageErrored` callback, drop message
-- **Buffer Full**: Waits/blocks until space available (backpressure)
-- **Broker Unavailable**: Retries controlled by `maxRetries` config, errors reported via callback
-- **No Topic Route Match**: Log error, invoke `messageErrored` callback with `no_topic_match` error type
+#### QoS 0-24 (Low Priority - Fire and Forget)
+- **Encoding Failures**: Return `Dropped` outcome with nil error, invoke `messageErrored` callback
+- **Buffer Full**: Return `Dropped` outcome with nil error (expected behavior for low priority)
+- **Broker Unavailable**: Retries controlled by `maxRetries` config, errors reported via callback async
+- **No Topic Route Match**: Return `Dropped` outcome, invoke `messageErrored` callback
 - **Missing Metadata Field**: Fall back to round-robin, log warning, invoke callback
-- All errors are asynchronous - reported via `messageErrored` callback in franz-go promise, not returned
+- Uses [franz-go](https://github.com/twmb/franz-go)'s TryProduce internally - never blocks caller
 
-#### TryProduce() Error Handling (Asynchronous Non-Blocking)
-- **Encoding Failures**: Log error, invoke `messageErrored` callback, drop message
-- **Buffer Full**: Returns `ErrMaxBuffered` immediately (no callback invoked for this error)
-- **Broker Unavailable**: Retries controlled by `maxRetries` config, errors reported via callback
-- **No Topic Route Match**: Log error, invoke `messageErrored` callback with `no_topic_match` error type
+#### QoS 25-74 (Medium/High Priority - Enqueue and Confirm)
+- **Encoding Failures**: Return `Queued` outcome (will fail async), invoke `messageErrored` callback
+- **Buffer Full**: Waits/blocks until space available, returns `Queued` outcome
+- **Broker Unavailable**: Retries controlled by `maxRetries` config ([franz-go](https://github.com/twmb/franz-go) retries automatically), errors reported via callback async
+- **No Topic Route Match**: Return outcome with error, invoke `messageErrored` callback
 - **Missing Metadata Field**: Fall back to round-robin, log warning, invoke callback
-- Buffer-full errors returned immediately; all other errors asynchronous via callback
+- Uses [franz-go](https://github.com/twmb/franz-go)'s Produce internally - async with automatic retries
 
-#### ProduceSync() Error Handling (Synchronous)
-- **Encoding Failures**: Return error immediately
-- **Buffer Full**: Bypasses buffer (synchronous), not applicable
+#### QoS 75-99 (Critical Priority - Synchronous Confirmation)
+- **Encoding Failures**: Return `Failed` outcome with error
+- **Buffer Full**: N/A (synchronous path bypasses buffer)
 - **Broker Unavailable**:
   - Retries controlled by `maxRetries` config:
-    - `-1`: No retries, fail immediately, return error
+    - `-1`: No retries, return `Failed` with error immediately
     - `0`: Unlimited retries (default), blocks until success or timeout
-    - `>0`: Retry up to N times, return error if exhausted
-  - Franz-go handles exponential backoff automatically
-- **No Topic Route Match**: Return error immediately
+    - `>0`: Retry up to N times, return `Failed` if exhausted
+  - [franz-go](https://github.com/twmb/franz-go) handles exponential backoff automatically
+- **No Topic Route Match**: Return `Failed` outcome with error
 - **Missing Metadata Field**: Fall back to round-robin (same as others)
-- All errors are synchronous - returned from the ProduceSync() call
-- Still invokes metric callbacks (in addition to returning error)
+- Uses [franz-go](https://github.com/twmb/franz-go)'s ProduceSync internally - blocks for acknowledgment
+- Still invokes metric callbacks in addition to returning error
 
-#### Startup Validation (Both Methods)
+#### Startup Validation
 - **Empty Topics List**: Fail at startup (invalid configuration)
 - **Invalid ShardBy Value**: Fail at startup (invalid configuration)
 - **Invalid Configuration**: Fail at startup if TopicMap is empty, patterns are invalid, or TopicRoute combinations are invalid
 - **Authentication Failure**: Fail at Start() (don't accept events until connected)
 
-### 3.17 Testing Strategy
+### 1.17 Testing Strategy
 
 1. **Unit Tests**:
    - Message encoding/formatting
    - Glob pattern matching (various patterns, edge cases, case-sensitivity, ignoreCase flag)
-   - Production methods:
-     - Produce() waits if buffer full, callback-based errors
-     - TryProduce() fails immediately if buffer full, returns error + callback
-     - ProduceSync() blocks until acknowledgment, returns error
-     - All methods are thread-safe (concurrent calls)
-     - Error handling differences (callback vs return vs mixed)
+   - Produce() method with QoS routing:
+     - QoS 0-24: Returns Dropped when buffer full, Queued when accepted
+     - QoS 25-74: Waits if buffer full, returns Queued
+     - QoS 75-99: Blocks for ack, returns Accepted/Failed
+     - Thread-safe concurrent calls
+     - Correct outcome for each QoS level and error condition
    - Topic selection strategies:
      - Round-robin distribution (verify even distribution, counter in TopicRoute)
      - Verify round-robin counter initialization during New()
@@ -1137,12 +1405,12 @@ Error handling differs between the three production methods:
      - **Required fields**: Config must be set, Brokers non-empty, TopicMap non-empty
      - **TopicRoute validation**:
        - Pattern must be set (non-empty)
-       - Pattern must be valid for filepath.Match
+       - Pattern must follow simplified syntax (exact, `*`, prefix-`*`, or escaped `\*`)
        - Only two valid combinations (single topic vs multi-topic)
        - Topic/Topics mutual exclusivity
        - Empty Topics list in multi-topic route
        - ShardBy required for multi-topic, empty for single-topic
-       - Invalid ShardBy values (must be roundrobin, deviceid, or metadata:<field>)
+       - Invalid ShardBy values (must be `"roundrobin"`, `"deviceid"`, or `"metadata:<field>"`)
      - **Enum validation**:
        - Invalid CompressionCodec enum values
        - Invalid Acks enum values
@@ -1170,19 +1438,12 @@ Error handling differs between the three production methods:
 
 2. **Integration Tests**:
    - Mock Kafka broker using testcontainers
-   - Test Produce() method:
-     - Verify async message delivery to correct topics
-     - Verify error callbacks are invoked on failures
-     - Verify backpressure/waiting when buffer full
-     - High-volume throughput testing
-   - Test TryProduce() method:
-     - Verify async message delivery
-     - Verify immediate error return when buffer full
-     - Verify callbacks for non-buffer errors
-   - Test ProduceSync() method:
-     - Verify synchronous acknowledgment
-     - Verify errors are returned immediately
-     - Test timeout and retry behavior
+   - Test Produce() with different QoS levels:
+     - QoS 0-24: Verify Dropped outcome when buffer full, async delivery when accepted
+     - QoS 25-74: Verify Queued outcome, backpressure/waiting when buffer full
+     - QoS 75-99: Verify Accepted outcome on success, Failed on error, synchronous behavior
+     - Verify error callbacks invoked correctly for each QoS level
+     - High-volume throughput testing across all QoS levels
    - Verify message delivery to correct topics (all sharding strategies)
    - Verify partition assignment by device ID
    - Test message ordering (same device ID goes to same partition within selected topic)
@@ -1196,102 +1457,30 @@ Error handling differs between the three production methods:
    - Performance impact of topic selection (hashing vs round-robin)
    - Verify round-robin distribution under load
 
-## 4. Implementation Phases
-
-### 4.1 Phase 1: Core Library Implementation
-- [ ] Add franz-go and wrp-go dependencies
-- [ ] Define enum types (CompressionCodec, Acks) with constants
-- [ ] Implement options pattern (WithConfig, WithLogger, individual metric options)
-- [ ] Implement glob pattern matching using `path/filepath.Match` for topic routing
-  - [ ] Case-sensitive matching by default
-  - [ ] Case-insensitive matching when IgnoreCase flag is set
-- [ ] Implement topic selection strategies:
-  - [ ] Single topic (no sharding)
-  - [ ] Round-robin with atomic counters stored in TopicRoute
-  - [ ] Device ID sharding with FNV hashing
-  - [ ] Metadata field sharding with fallback
-- [ ] Initialize round-robin counters on TopicRoute during New() for routes with ShardBy="roundrobin"
-- [ ] Implement configurable header extraction (wrp.* references + literal strings, see wrp-go)
-- [ ] Implement `Config` configuration struct with:
-  - [ ] Topic/Topics mutual exclusivity validation
-  - [ ] IgnoreCase field support
-  - [ ] CompressionCodec and Acks enum validation
-  - [ ] MaxBufferedRecords, RequestTimeout, Linger zero/negative handling
-- [ ] Implement `Dispatcher` with:
-  - [ ] Thread-safe message publishing
-  - [ ] Start() and Stop() lifecycle methods
-  - [ ] Produce() method - async with callback, waits if buffer full (maps to franz-go Produce)
-  - [ ] TryProduce() method - async with callback, fails immediately if buffer full (maps to franz-go TryProduce)
-  - [ ] ProduceSync() method - sync, waits for ack, returns error (maps to franz-go ProduceSync)
-  - [ ] All methods concurrent-safe (can be called from multiple goroutines)
-  - [ ] Promise callback integration with application metrics callbacks
-  - [ ] BufferedRecords() method returns (current int, max int)
-  - [ ] Use client.BufferedProduceRecords() for current count
-  - [ ] Return configured MaxBufferedRecords as max value
-- [ ] Implement device ID extraction from WRP Source field (see wrp-go)
-- [ ] Add configuration validation (TopicRoute combinations, enum values, patterns)
-- [ ] Implement `New()` constructor with option application and validation
-
-### 4.2 Phase 2: Quality & Testing
-- [ ] Comprehensive error handling:
-  - [ ] No-match scenarios
-  - [ ] Header extraction errors
-  - [ ] Missing metadata field fallback
-  - [ ] Empty topics list
-  - [ ] Nil callback safety
-- [ ] Unit tests (>80% coverage):
-  - [ ] Options pattern (Config, Logger, Measures options)
-  - [ ] Option precedence and validation
-  - [ ] Glob matching with various patterns
-  - [ ] All topic selection strategies
-  - [ ] Device ID extraction
-  - [ ] Header extraction (wrp.* fields, literal strings, missing/empty fields)
-  - [ ] Metadata field extraction and fallback
-  - [ ] Configuration validation (empty TopicMap, Topic/Topics mutual exclusivity, invalid patterns, etc.)
-  - [ ] Metric callback invocations (nil-safe, correct parameters)
-- [ ] API documentation (GoDoc)
-- [ ] Usage examples and README
-
-### 4.3 Phase 3: Integration & Performance
-- [ ] SASL/TLS authentication support
-- [ ] Integration tests with testcontainers
-  - [ ] All sharding strategies
-  - [ ] Partition assignment verification
-  - [ ] Message ordering verification
-- [ ] Performance benchmarking
-  - [ ] Throughput testing
-  - [ ] Latency measurements
-  - [ ] Memory profiling under load
-  - [ ] Comparison of sharding strategies
-
-### 4.4 Phase 4: Talaria Integration
-- [ ] Create integration example code
-- [ ] Talaria-specific configuration documentation
-- [ ] Deployment guide for Talaria
-- [ ] Monitoring/alerting recommendations
-- [ ] Canary deployment in staging environment
-
-## 5. Advantages of This Library Design
+## 2. Advantages of This Library Design
 
 1. **Reusability**: Not tied to Talaria - works directly with wrp.Message for maximum flexibility
 2. **Non-Breaking** (for Talaria): Existing HTTP delivery continues unchanged when integrated via adapter
-3. **Flexibility**:
-   - Can enable Kafka per-environment or per-event-type
-   - Three publish modes for different use cases:
-     - Produce() - high throughput with backpressure
-     - TryProduce() - non-blocking for real-time systems
-     - ProduceSync() - immediate feedback for critical messages
-   - Choose async/sync and blocking/non-blocking per use case
+3. **WRP QoS Integration**:
+   - Single Produce() method automatically handles WRP QualityOfService semantics
+   - QoS 0-24: Fire-and-forget (drops if buffer full)
+   - QoS 25-74: Async with automatic retries (waits if buffer full, franz-go retries)
+   - QoS 75-99: Synchronous confirmation (blocks for ack)
+   - Explicit outcome feedback (Accepted, Queued, Dropped, Failed)
+   - No manual QoS mapping needed - library understands WRP semantics
 4. **Performance**:
-   - franz-go is highly optimized, async by default
-   - Produce() and TryProduce() provide maximum throughput via batching
-   - Aligns directly with franz-go API for optimal performance
+   - [franz-go](https://github.com/twmb/franz-go) is highly optimized, async by default
+   - QoS-based routing uses optimal [franz-go](https://github.com/twmb/franz-go) method for each priority level
+   - Low priority (QoS 0-24): Never blocks, maximum throughput
+   - Medium/High (QoS 25-74): Batching for high throughput with reliability
+   - Critical (QoS 75-99): Synchronous confirmation when needed
    - Round-robin counters stored in TopicRoute (no map lookup overhead)
    - Zero-overhead buffer utilization via on-demand BufferedRecords() method
 5. **Reliability**:
-   - Built-in retries, buffering, and compression
-   - ProduceSync() provides immediate error feedback for critical messages
-   - TryProduce() enables detecting and handling backpressure
+   - Built-in retries, buffering, and compression via [franz-go](https://github.com/twmb/franz-go)
+   - QoS 75-99 provides immediate error feedback for critical messages
+   - QoS 0-24 fails fast when buffer full (explicit Dropped outcome)
+   - QoS 25-74 retries async until success
 6. **Clean API Design**:
    - Functional options pattern for configuration and runtime dependencies
    - `WithConfig()` option accepts structs loaded from YAML
@@ -1317,7 +1506,7 @@ Error handling differs between the three production methods:
 12. **Library Independence**: No hard dependencies on metrics or logging frameworks beyond interfaces
 13. **Testability**: Options pattern makes testing easy with mock dependencies
 
-## 6. Operational Considerations
+## 3. Operational Considerations
 
 1. **Kafka Cluster Requirements**:
    - Minimum 3 brokers for HA
@@ -1343,33 +1532,133 @@ Error handling differs between the three production methods:
    - Monitor `shard_strategy` metric label to observe distribution patterns
    - Validate metadata field availability before using metadata sharding in production
 
-## 7. Dependencies
+## 4. Use Case: Talaria Integration
 
-- **franz-go**: `github.com/twmb/franz-go` (latest stable: v1.18+)
+This library is initially designed for integration with Talaria, an xmidt-org WebSocket connection manager. Understanding Talaria's architecture helps illustrate the library's purpose and integration pattern.
+
+### 4.1 Talaria's Current Event Flow
+1. **Device Events** → Devices generate events via WebSocket, and Talaria generates some events internally (e.g., online/offline)
+2. **Dispatcher Pattern** → `device.Listener` interface processes events through:
+   - `eventDispatcher`: Converts events to HTTP requests, queues them
+   - `ackDispatcher`: Handles QOS acknowledgments back to devices
+3. **WorkerPool** → Processes outbound HTTP request queue (100 workers default)
+4. **HTTP Transport** → Sends to configured endpoints (typically Caduceus)
+
+### 4.2 Key Integration Points
+- **Dispatcher interface**: Simple `device.Listener` interface with `OnDeviceEvent(*device.Event)` method
+  - Applications implement a thin adapter that extracts `wrp.Message` from `device.Event` and calls `Send()` or `Transfer()`
+  - The library works directly with `wrp.Message` for maximum flexibility
+  - Other applications can provide their own event sources
+- **Configuration pattern**: YAML-based configuration using [goschtalt](https://github.com/goschtalt/goschtalt)
+- **Metrics pattern**: Applications provide metrics via callback functions
+
+## 5. Dependencies
+
+- **[franz-go](https://github.com/twmb/franz-go)**: `github.com/twmb/franz-go` (latest stable: v1.18+)
   - `franz-go/pkg/kgo`: Core Kafka client
   - `franz-go/pkg/sasl`: SASL authentication (for Config.SASL field)
   - `franz-go/pkg/kadm`: Admin operations (optional, for topic creation)
 - **crypto/tls**: Go standard library TLS (for Config.TLS field)
-- **wrp-go**: `github.com/xmidt-org/wrp-go` - WRP message definitions and processing
+- **[wrp-go](https://github.com/xmidt-org/wrp-go)**: `github.com/xmidt-org/wrp-go` - WRP message definitions and processing
 
-## 8. Alternatives Considered
+## 6. Alternatives Considered
 
 1. **Tightly couple to Talaria**: Rejected - library should be reusable
-2. **Use Sarama**: Rejected - franz-go has better performance and simpler API
-3. **Use Confluent Go Client**: Rejected - franz-go is pure Go, better performance
-4. **Hard-code Prometheus**: Rejected - limits reusability, callback interface more flexible
+2. **Use [Sarama](https://github.com/IBM/sarama)**: Rejected - [franz-go](https://github.com/twmb/franz-go) has better performance and simpler API
+3. **Use [Confluent Go Client](https://github.com/confluentinc/confluent-kafka-go)**: Rejected - [franz-go](https://github.com/twmb/franz-go) is pure Go, better performance
+4. **Hard-code [Prometheus](https://prometheus.io/)**: Rejected - limits reusability, callback interface more flexible
 5. **Traditional constructor with many parameters**: Rejected - options pattern more extensible
 
-## 9. Success Criteria
+## 7. Implementation Phases
 
-### 9.1 Library Quality
+### 7.1 Phase 1: Core Library Implementation
+- [ ] Add [franz-go](https://github.com/twmb/franz-go) and [wrp-go](https://github.com/xmidt-org/wrp-go) dependencies
+- [ ] Define enum types (CompressionCodec, Acks) with constants
+- [ ] Implement options pattern (WithConfig, WithLogger, individual metric options)
+- [ ] Implement simplified pattern matching for topic routing
+  - [ ] Catch-all: `*` matches everything
+  - [ ] Exact match: pattern == event type
+  - [ ] Prefix match: pattern ending with `*` matches prefix
+  - [ ] Escaped asterisk: `\*` matches literal `*` character
+  - [ ] Case-sensitive matching by default
+  - [ ] Case-insensitive matching when IgnoreCase flag is set
+- [ ] Implement topic selection strategies:
+  - [ ] Single topic (no sharding)
+  - [ ] Round-robin with atomic counters stored in TopicRoute
+  - [ ] Device ID sharding with FNV hashing
+  - [ ] Metadata field sharding with fallback
+- [ ] Initialize round-robin counters on TopicRoute during `New()` for routes with `ShardBy="roundrobin"`
+- [ ] Implement configurable header extraction (wrp.* references + literal strings, see wrp-go)
+- [ ] Implement `Config` configuration struct with:
+  - [ ] Topic/Topics mutual exclusivity validation
+  - [ ] IgnoreCase field support
+  - [ ] CompressionCodec and Acks enum validation
+  - [ ] MaxBufferedRecords, RequestTimeout, Linger zero/negative handling
+- [ ] Implement `Dispatcher` with:
+  - [ ] Thread-safe message publishing
+  - [ ] Start() and Stop() lifecycle methods
+  - [ ] Produce(ctx, msg) (Outcome, error) method with QoS-aware routing:
+    - [ ] QoS 0-24: Uses franz-go TryProduce, returns Dropped/Queued
+    - [ ] QoS 25-74: Uses franz-go Produce, returns Queued
+    - [ ] QoS 75-99: Uses franz-go ProduceSync, returns Accepted/Failed
+  - [ ] Outcome type with constants: Accepted, Queued, Dropped, Failed
+  - [ ] Promise callback integration with application metrics callbacks
+  - [ ] BufferedRecords() method returns (current int, max int)
+  - [ ] Use client.BufferedProduceRecords() for current count
+  - [ ] Return configured MaxBufferedRecords as max value
+- [ ] Implement device ID extraction from WRP Source field (see wrp-go)
+- [ ] Add configuration validation (TopicRoute combinations, enum values, patterns)
+- [ ] Implement `New()` constructor with option application and validation
+
+### 7.2 Phase 2: Quality & Testing
+- [ ] Comprehensive error handling:
+  - [ ] No-match scenarios
+  - [ ] Header extraction errors
+  - [ ] Missing metadata field fallback
+  - [ ] Empty topics list
+  - [ ] Nil callback safety
+- [ ] Unit tests (>80% coverage):
+  - [ ] Options pattern (Config, Logger, Measures options)
+  - [ ] Option precedence and validation
+  - [ ] Glob matching with various patterns
+  - [ ] All topic selection strategies
+  - [ ] Device ID extraction
+  - [ ] Header extraction (wrp.* fields, literal strings, missing/empty fields)
+  - [ ] Metadata field extraction and fallback
+  - [ ] Configuration validation (empty TopicMap, Topic/Topics mutual exclusivity, invalid patterns, etc.)
+  - [ ] Metric callback invocations (nil-safe, correct parameters)
+- [ ] API documentation (GoDoc)
+- [ ] Usage examples and README
+
+### 7.3 Phase 3: Integration & Performance
+- [ ] SASL/TLS authentication support
+- [ ] Integration tests with testcontainers
+  - [ ] All sharding strategies
+  - [ ] Partition assignment verification
+  - [ ] Message ordering verification
+- [ ] Performance benchmarking
+  - [ ] Throughput testing
+  - [ ] Latency measurements
+  - [ ] Memory profiling under load
+  - [ ] Comparison of sharding strategies
+
+### 7.4 Phase 4: Talaria Integration
+- [ ] Create integration example code
+- [ ] Talaria-specific configuration documentation
+- [ ] Deployment guide for Talaria
+- [ ] Monitoring/alerting recommendations
+- [ ] Canary deployment in staging environment
+
+## 8. Success Criteria
+
+### 8.1 Library Quality
 1. **Performance**: High-throughput event publishing with low latency, suitable for production workloads
 2. **Reliability**: Handle network failures gracefully with configurable retry behavior
 3. **Testability**: Comprehensive unit and integration test coverage
 4. **Documentation**: Complete API documentation and usage examples
 5. **Minimal Dependencies**: No hard dependencies on metrics frameworks, uses callback interface for observability
 
-### 9.2 Talaria Integration Success
+### 8.2 Talaria Integration Success
 1. Zero impact on existing HTTP delivery performance when running in parallel
 2. Comprehensive metrics visible in monitoring system
 3. Successful canary deployment in staging environment
