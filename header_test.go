@@ -101,7 +101,7 @@ func TestBuildHeaders(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			dc := &DynamicConfig{
 				Headers: tt.headerConfig,
 			}
@@ -175,7 +175,7 @@ func TestExtractWRPField(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			var testMsg *wrp.Message
 			switch tt.name {
 			case "nil message":
@@ -271,7 +271,7 @@ func TestExtractWRPField_HTTPHeaders(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := extractWRPField(msg, tt.fieldName)
 
 			// Compare lengths first
@@ -349,7 +349,7 @@ func TestExtractWRPField_Metadata(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			testMsg := msg
 			if tt.name == "nil metadata map" {
 				testMsg = &wrp.Message{} // No metadata
@@ -436,7 +436,7 @@ func TestBuildHeaders_WithMetadata(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			dc := &DynamicConfig{
 				Headers: tt.headerConfig,
 			}
@@ -527,7 +527,7 @@ func TestBuildHeaders_WithHTTPHeaders(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			dc := &DynamicConfig{
 				Headers: tt.headerConfig,
 			}
@@ -639,7 +639,7 @@ func TestBuildHeaders_MixedSources(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			dc := &DynamicConfig{
 				Headers: tt.headerConfig,
 			}

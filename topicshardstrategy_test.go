@@ -14,64 +14,64 @@ func TestIsMetadataStrategy(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name          string
-		strategy      TopicShardStrategy
+		name           string
+		strategy       TopicShardStrategy
 		wantIsMetadata bool
-		wantFieldName string
+		wantFieldName  string
 	}{
 		{
-			name:          "metadata strategy with field",
-			strategy:      "metadata:tenant_id",
+			name:           "metadata strategy with field",
+			strategy:       "metadata:tenant_id",
 			wantIsMetadata: true,
-			wantFieldName: "tenant_id",
+			wantFieldName:  "tenant_id",
 		},
 		{
-			name:          "metadata strategy with different field",
-			strategy:      "metadata:region",
+			name:           "metadata strategy with different field",
+			strategy:       "metadata:region",
 			wantIsMetadata: true,
-			wantFieldName: "region",
+			wantFieldName:  "region",
 		},
 		{
-			name:          "metadata strategy with empty field",
-			strategy:      "metadata:",
+			name:           "metadata strategy with empty field",
+			strategy:       "metadata:",
 			wantIsMetadata: false,
-			wantFieldName: "",
+			wantFieldName:  "",
 		},
 		{
-			name:          "round robin strategy",
-			strategy:      TopicShardRoundRobin,
+			name:           "round robin strategy",
+			strategy:       TopicShardRoundRobin,
 			wantIsMetadata: false,
-			wantFieldName: "",
+			wantFieldName:  "",
 		},
 		{
-			name:          "device ID strategy",
-			strategy:      TopicShardDeviceID,
+			name:           "device ID strategy",
+			strategy:       TopicShardDeviceID,
 			wantIsMetadata: false,
-			wantFieldName: "",
+			wantFieldName:  "",
 		},
 		{
-			name:          "none strategy",
-			strategy:      TopicShardNone,
+			name:           "none strategy",
+			strategy:       TopicShardNone,
 			wantIsMetadata: false,
-			wantFieldName: "",
+			wantFieldName:  "",
 		},
 		{
-			name:          "invalid strategy",
-			strategy:      "unknown",
+			name:           "invalid strategy",
+			strategy:       "unknown",
 			wantIsMetadata: false,
-			wantFieldName: "",
+			wantFieldName:  "",
 		},
 		{
-			name:          "metadata prefix but invalid",
-			strategy:      "metadat",
+			name:           "metadata prefix but invalid",
+			strategy:       "metadat",
 			wantIsMetadata: false,
-			wantFieldName: "",
+			wantFieldName:  "",
 		},
 		{
-			name:          "metadata with complex field name",
-			strategy:      "metadata:tenant_id.region",
+			name:           "metadata with complex field name",
+			strategy:       "metadata:tenant_id.region",
 			wantIsMetadata: true,
-			wantFieldName: "tenant_id.region",
+			wantFieldName:  "tenant_id.region",
 		},
 	}
 

@@ -7,7 +7,7 @@ require (
 	github.com/testcontainers/testcontainers-go/modules/kafka v0.39.0
 	github.com/twmb/franz-go v1.20.2
 	github.com/xmidt-org/eventor v1.0.23
-	github.com/xmidt-org/wrp-go/v5 v5.3.0
+	github.com/xmidt-org/wrp-go/v5 v5.4.0
 )
 
 require (

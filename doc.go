@@ -29,7 +29,6 @@
 //	    log.Fatal(err)
 //	}
 
-//
 //	msg := &wrp.Message{
 //	    Type:             wrp.SimpleEventMessageType,
 //	    Source:           "mac:112233445566",

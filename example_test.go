@@ -145,8 +145,8 @@ func Example_shardingDeviceID() {
 		InitialDynamicConfig: wrpkafka.DynamicConfig{
 			TopicMap: []wrpkafka.TopicRoute{
 				{
-					Pattern:       "device-*",
-					Topics:        []string{"device-0", "device-1", "device-2"},
+					Pattern:            "device-*",
+					Topics:             []string{"device-0", "device-1", "device-2"},
 					TopicShardStrategy: wrpkafka.TopicShardDeviceID,
 				},
 			},
@@ -166,8 +166,8 @@ func Example_shardingMetadata() {
 		InitialDynamicConfig: wrpkafka.DynamicConfig{
 			TopicMap: []wrpkafka.TopicRoute{
 				{
-					Pattern:       "*",
-					Topics:        []string{"region-east", "region-west"},
+					Pattern:            "*",
+					Topics:             []string{"region-east", "region-west"},
 					TopicShardStrategy: "metadata:region",
 				},
 			},

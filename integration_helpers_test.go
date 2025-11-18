@@ -111,7 +111,7 @@ func createTestPublisher(t *testing.T, broker string, routes []wrpkafka.TopicRou
 	t.Helper()
 
 	return &wrpkafka.Publisher{
-		Brokers:              []string{broker},
+		Brokers:                []string{broker},
 		AllowAutoTopicCreation: true, // Enable for integration tests
 		InitialDynamicConfig: wrpkafka.DynamicConfig{
 			TopicMap: routes,

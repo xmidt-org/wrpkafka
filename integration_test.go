@@ -165,8 +165,8 @@ func TestIntegration_RoundRobinSharding(t *testing.T) {
 
 	pub := createTestPublisher(t, broker, []wrpkafka.TopicRoute{
 		{
-			Pattern:       "*",
-			Topics:        []string{"shard-0", "shard-1", "shard-2"},
+			Pattern:            "*",
+			Topics:             []string{"shard-0", "shard-1", "shard-2"},
 			TopicShardStrategy: wrpkafka.TopicShardRoundRobin,
 		},
 	})
@@ -212,8 +212,8 @@ func TestIntegration_DeviceIDSharding(t *testing.T) {
 
 	pub := createTestPublisher(t, broker, []wrpkafka.TopicRoute{
 		{
-			Pattern:       "*",
-			Topics:        []string{"device-shard-0", "device-shard-1", "device-shard-2"},
+			Pattern:            "*",
+			Topics:             []string{"device-shard-0", "device-shard-1", "device-shard-2"},
 			TopicShardStrategy: wrpkafka.TopicShardDeviceID,
 		},
 	})
