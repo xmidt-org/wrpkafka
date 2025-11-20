@@ -107,10 +107,10 @@ func main() {
     // Create logger
     logger, _ := zap.NewProduction()
 
-    // Create dispatcher with options
+    // Create publisher with options
     // Note: WithConfig() is required - New() returns error if omitted
     // WithLogger() is optional - defaults to zap.NewNop() if not provided
-    dispatcher, err := wrpkafka.New(
+    publisher, err := wrpkafka.New(
         wrpkafka.WithConfig(config),  // Required
         wrpkafka.WithLogger(logger),  // Optional
         wrpkafka.WithMessagesPublished(func(eventType, topic, strategy string) {
@@ -122,11 +122,11 @@ func main() {
         panic(err)
     }
 
-    // Start the dispatcher (connects to Kafka)
-    if err := dispatcher.Start(); err != nil {
+    // Start the publisher (connects to Kafka)
+    if err := publisher.Start(); err != nil {
         panic(err)
     }
-    defer dispatcher.Stop()
+    defer publisher.Stop(context.Background())
 
     // Create a WRP message with QoS
     msg := &wrp.Message{
@@ -142,7 +142,7 @@ func main() {
     //   0-24: Fire-and-forget (drops if buffer full)
     //   25-74: Async with automatic retries (waits if buffer full, franz-go retries)
     //   75-99: Synchronous with confirmation
-    outcome, err := dispatcher.Produce(context.Background(), msg)
+    outcome, err := publisher.Produce(context.Background(), msg)
 
     switch outcome {
     case wrpkafka.Accepted:
@@ -185,11 +185,11 @@ These fields can be updated at runtime via `UpdateConfig()`:
 **Hot-Reload Example:**
 ```go
 // Initial configuration from YAML
-dispatcher, err := wrpkafka.New(
+publisher, err := wrpkafka.New(
     wrpkafka.WithConfig(config),
     wrpkafka.WithLogger(logger),
 )
-dispatcher.Start()
+publisher.Start()
 
 // Later: Update routing without restart
 newDynamic := wrpkafka.DynamicConfig{
@@ -204,7 +204,7 @@ newDynamic := wrpkafka.DynamicConfig{
     Acks:             wrpkafka.AcksAll,
 }
 
-if err := dispatcher.UpdateConfig(newDynamic); err != nil {
+if err := publisher.UpdateConfig(newDynamic); err != nil {
     log.Error("config update failed", zap.Error(err))
     return
 }
@@ -242,7 +242,7 @@ The library exports the following public types and functions:
 - `Failed` - Synchronous delivery failed (QoS 75-99 only)
 
 **Constructor & Options:**
-- `New(opts ...Option) (*Dispatcher, error)` - Main constructor
+- `New(opts ...Option) (*Publisher, error)` - Main constructor
 - `WithConfig(Config) Option` - Set configuration from struct
 - `WithLogger(*zap.Logger) Option` - Set logger instance
 - `WithMessagesPublished(func(...) ) Option` - Metric callback for successful publishes
@@ -250,11 +250,11 @@ The library exports the following public types and functions:
 - `WithPublishLatency(func(...) ) Option` - Metric callback for latency tracking
 
 **Main Interface:**
-- `(*Dispatcher) Start() error` - Start the dispatcher and connect to Kafka
-- `(*Dispatcher) Stop()` - Stop the dispatcher and flush buffered messages
-- `(*Dispatcher) Produce(context.Context, *wrp.Message) (Outcome, error)` - Publish a WRP message with QoS-aware routing (thread-safe)
-- `(*Dispatcher) UpdateConfig(DynamicConfig) error` - Atomically update runtime configuration (thread-safe, takes effect immediately for new messages)
-- `(*Dispatcher) BufferedRecords() (current int, max int)` - Returns current buffered record count and max buffer size (thread-safe, zero overhead)
+- `(*Publisher) Start() error` - Start the publisher and connect to Kafka
+- `(*Publisher) Stop()` - Stop the publisher and flush buffered messages
+- `(*Publisher) Produce(context.Context, *wrp.Message) (Outcome, error)` - Publish a WRP message with QoS-aware routing (thread-safe)
+- `(*Publisher) UpdateConfig(DynamicConfig) error` - Atomically update runtime configuration (thread-safe, takes effect immediately for new messages)
+- `(*Publisher) BufferedRecords() (current int, max int)` - Returns current buffered record count and max buffer size (thread-safe, zero overhead)
 
 ### 1.5 Component Details
 
@@ -352,7 +352,7 @@ type Config struct {
 }
 
 // DynamicConfig contains configuration fields that can be updated at runtime
-// without restarting the Dispatcher. Use UpdateConfig() to apply changes.
+// without restarting the Publisher. Use UpdateConfig() to apply changes.
 type DynamicConfig struct {
     // TopicMap defines routing rules from WRP event types to Kafka topics.
     // Patterns are evaluated in order; first match wins.
@@ -398,22 +398,22 @@ const (
 
 type TopicRoute struct {
     Pattern     string                       // Glob pattern to match event types (case-sensitive by default)
-    IgnoreCase  bool                         // If true, pattern matching is case-insensitive
+    CaseInsensitive  bool                         // If true, pattern matching is case-insensitive
     Topic       string                       // Single target topic (mutually exclusive with Topics)
     Topics      []string                     // Multiple target topics (mutually exclusive with Topic)
-    ShardBy     string                       // `"roundrobin"`, `"metadata:<fieldname>"`, `"deviceid"`, or empty (only valid with Topics)
+    TopicShardStrategy     string                       // `"roundrobin"`, `"metadata:<fieldname>"`, `"deviceid"`, or empty (only valid with Topics)
 
     // Internal state (initialized during New(), not from config)
-    roundRobinCounter *atomic.Uint64         // Counter for round-robin distribution (only used when `ShardBy="roundrobin"`)
+    roundRobinCounter *atomic.Uint64         // Counter for round-robin distribution (only used when `TopicShardStrategy="roundrobin"`)
 }
 ```
 
-#### 1.5.2 Dispatcher
+#### 1.5.2 Publisher
 
 The main type that publishes events to Kafka:
 
 ```go
-type Dispatcher struct {
+type Publisher struct {
     // Static configuration (immutable after New())
     client              *kgo.Client
     logger              *zap.Logger
@@ -427,30 +427,30 @@ type Dispatcher struct {
     publishLatency      func(eventType, topic, shardStrategy string, duration time.Duration)
 }
 
-// New creates a new Dispatcher with the provided options.
+// New creates a new Publisher with the provided options.
 // Does not connect to Kafka - call Start() to begin operation.
 // WithConfig() is required - returns error if not provided.
 // WithLogger() is optional - defaults to zap.NewNop() if not provided.
-func New(opts ...Option) (*Dispatcher, error) {
-    // Create dispatcher with defaults (logger = zap.NewNop())
+func New(opts ...Option) (*Publisher, error) {
+    // Create publisher with defaults (logger = zap.NewNop())
     // Apply all options
     // Call validate() to check configuration
     // Returns error if WithConfig() not called or validation fails
 }
 
-// validate is a package-private function that validates the Dispatcher configuration.
+// validate is a package-private function that validates the Publisher configuration.
 // Returns error if configuration is invalid.
-func validate(d *Dispatcher) error {
+func validate(p *Publisher) error {
     // Validates all configuration requirements (see validation rules below)
 }
 
 // Start connects to Kafka and begins accepting events.
 // Returns error if connection fails or configuration is invalid.
-func (d *Dispatcher) Start() error
+func (p *Publisher) Start() error
 
-// Stop gracefully shuts down the dispatcher and flushes buffered messages.
+// Stop gracefully shuts down the publisher and flushes buffered messages.
 // Blocks until all buffered messages are sent or timeout occurs.
-func (d *Dispatcher) Stop()
+func (p *Publisher) Stop()
 
 // Produce publishes a WRP message to Kafka. The message is processed according
 // to its QualityOfService field, which determines the routing strategy and
@@ -466,13 +466,13 @@ func (d *Dispatcher) Stop()
 // Returns:
 //   - Outcome: What happened (Accepted, Queued, Dropped, Failed)
 //   - error: Non-nil only for QoS 75-99 synchronous failures
-func (d *Dispatcher) Produce(ctx context.Context, msg *wrp.Message) (Outcome, error)
+func (p *Publisher) Produce(ctx context.Context, msg *wrp.Message) (Outcome, error)
 
 // BufferedRecords returns the current and maximum buffered record counts.
 // Thread-safe. Zero overhead - simply calls franz-go's client.BufferedProduceRecords().
 // Returns (0, 0) if MaxBufferedRecords is 0 (buffering disabled).
 // Application can calculate utilization as: float64(current) / float64(max)
-func (d *Dispatcher) BufferedRecords() (current int, max int)
+func (p *Publisher) BufferedRecords() (current int, max int)
 
 // UpdateConfig atomically updates the dynamic configuration.
 // The update takes effect immediately for new Produce() calls.
@@ -482,19 +482,19 @@ func (d *Dispatcher) BufferedRecords() (current int, max int)
 //   - TopicMap must not be empty
 //   - All patterns must follow simplified syntax
 //   - TopicRoute combinations must be valid
-//   - ShardBy values must be valid
+//   - TopicShardStrategy values must be valid
 //   - CompressionCodec and Acks must be valid enum values
 //
-// Round-robin counters are initialized for new routes with ShardBy="roundrobin".
+// Round-robin counters are initialized for new routes with TopicShardStrategy="roundrobin".
 // Note: Existing routes that match the old config will reset their counters.
 //
 // Thread-safe: Can be called concurrently with Produce().
-func (d *Dispatcher) UpdateConfig(next DynamicConfig) error
+func (p *Publisher) UpdateConfig(next DynamicConfig) error
 
 // Key methods (simplified - implementation details omitted):
 // - getEventType: Extracts event type from WRP Destination
 // - matchTopicRoute: Finds matching TopicRoute using glob patterns
-// - selectTopic: Chooses topic based on ShardBy strategy
+// - selectTopic: Chooses topic based on TopicShardStrategy strategy
 //   - For round-robin: uses route.roundRobinCounter directly (no map lookup)
 // - getDeviceID: Extracts device ID for partition key
 // - extractHeaders: Builds Kafka headers from config
@@ -504,7 +504,7 @@ func (d *Dispatcher) UpdateConfig(next DynamicConfig) error
 - Convert `wrp.Message` to Kafka records
 - Extract event type from WRP Destination field (event-type portion only, see [wrp-go](https://github.com/xmidt-org/wrp-go) for details)
 - Match event type to TopicRoute using glob patterns (configured order, first match wins)
-- Select specific topic from route's Topics list based on ShardBy strategy
+- Select specific topic from route's Topics list based on TopicShardStrategy strategy
 - Extract device ID for partition key (ensures ordering per device, see [wrp-go](https://github.com/xmidt-org/wrp-go) for Source field format)
 - Extract configured headers from WRP message (see [wrp-go](https://github.com/xmidt-org/wrp-go) for field definitions)
 - Encode WRP messages (msgpack format)
@@ -518,8 +518,8 @@ func (d *Dispatcher) UpdateConfig(next DynamicConfig) error
 **Initialization**:
 - TopicMap order is preserved as configured (first match wins)
 - Validates all patterns at startup (must follow simplified pattern syntax)
-- Validates ShardBy values at startup (must be `""`, `"roundrobin"`, `"deviceid"`, or `"metadata:<field>"`)
-- Initializes `roundRobinCounter` on each TopicRoute where `ShardBy="roundrobin"` (eliminates map lookup overhead)
+- Validates TopicShardStrategy values at startup (must be `""`, `"roundrobin"`, `"deviceid"`, or `"metadata:<field>"`)
+- Initializes `roundRobinCounter` on each TopicRoute where `TopicShardStrategy="roundrobin"` (eliminates map lookup overhead)
 - Stores headers config as-is (processed at message publish time)
 
 **Validation Rules** (checked by `validate()` function in `New()`):
@@ -533,10 +533,10 @@ func (d *Dispatcher) UpdateConfig(next DynamicConfig) error
    - `Pattern` must be non-empty
    - Pattern must follow simplified syntax (exact match, `*`, prefix with trailing `*`, or escaped `\*`)
    - Exactly one of the following two combinations:
-     - **Single topic**: `Topic` set, `Topics` empty, `ShardBy` empty
-     - **Multi-topic**: `Topics` set and non-empty, `Topic` empty, `ShardBy` set
-   - `ShardBy` (when used) must be one of: `"roundrobin"`, `"deviceid"`, or `"metadata:<fieldname>"`
-   - If `ShardBy` is set, `Topics` must have at least 1 topic
+     - **Single topic**: `Topic` set, `Topics` empty, `TopicShardStrategy` empty
+     - **Multi-topic**: `Topics` set and non-empty, `Topic` empty, `TopicShardStrategy` set
+   - `TopicShardStrategy` (when used) must be one of: `"roundrobin"`, `"deviceid"`, or `"metadata:<fieldname>"`
+   - If `TopicShardStrategy` is set, `Topics` must have at least 1 topic
 
 3. **Enum Validation**:
    - `CompressionCodec` must be one of the defined enum values (if set)
@@ -610,7 +610,7 @@ When a TopicRoute matches an event, a specific topic must be selected. The `Topi
 
 **Strategy: Single Topic** (using `Topic` field)
 - Use `Topic` (singular) for the single-topic case
-- `Topics` must be empty and `ShardBy` must be empty (validated at startup)
+- `Topics` must be empty and `TopicShardStrategy` must be empty (validated at startup)
 - Clearest configuration for the common single-topic scenario
 - Example:
   ```yaml
@@ -618,7 +618,7 @@ When a TopicRoute matches an event, a specific topic must be selected. The `Topi
     topic: device-lifecycle
   ```
 
-**Strategy: Round Robin** (using `Topics` field with `ShardBy: "roundrobin"`)
+**Strategy: Round Robin** (using `Topics` field with `TopicShardStrategy: "roundrobin"`)
 - Use `Topics` (plural) with multiple topic targets
 - Distributes messages evenly across topics in a rotating fashion
 - Uses an atomic counter stored directly in the TopicRoute (no map lookup overhead)
@@ -631,7 +631,7 @@ When a TopicRoute matches an event, a specific topic must be selected. The `Topi
     shardBy: roundrobin
   ```
 
-**Strategy: Device ID Sharding** (using `Topics` field with `ShardBy: "deviceid"`)
+**Strategy: Device ID Sharding** (using `Topics` field with `TopicShardStrategy: "deviceid"`)
 - Use `Topics` (plural) with multiple topic targets
 - Hashes the device ID (from `wrp.Source`) to select a topic
 - Ensures all events for a given device go to the same topic
@@ -643,7 +643,7 @@ When a TopicRoute matches an event, a specific topic must be selected. The `Topi
     shardBy: deviceid
   ```
 
-**Strategy: Metadata Field Sharding** (using `Topics` field with `ShardBy: "metadata:<fieldname>"`)
+**Strategy: Metadata Field Sharding** (using `Topics` field with `TopicShardStrategy: "metadata:<fieldname>"`)
 - Use `Topics` (plural) with multiple topic targets
 - Hashes a specific field from `wrp.Metadata` map to select a topic
 - Useful for grouping events by custom attributes (region, account, etc.)
@@ -665,10 +665,10 @@ When a TopicRoute matches an event, a specific topic must be selected. The `Topi
 - `Pattern` must be set (non-empty) for all routes
 - Only two valid TopicRoute combinations:
   1. **Pattern is set, Topic is set, everything else is empty** (single topic route)
-  2. **Pattern is set, Topics is set, ShardBy is set, Topic is empty** (multi-topic route with sharding)
+  2. **Pattern is set, Topics is set, TopicShardStrategy is set, Topic is empty** (multi-topic route with sharding)
 - All other combinations are invalid and cause startup failure
-- `ShardBy` must be one of: `"roundrobin"`, `"deviceid"`, or `"metadata:<fieldname>"` (when used with Topics)
-- Invalid `ShardBy` values cause startup failure
+- `TopicShardStrategy` must be one of: `"roundrobin"`, `"deviceid"`, or `"metadata:<fieldname>"` (when used with Topics)
+- Invalid `TopicShardStrategy` values cause startup failure
 - Metadata field names are not validated at startup (runtime fallback to round-robin)
 - `CompressionCodec` must be one of the defined enum values
 - `Acks` must be one of the defined enum values
@@ -686,7 +686,7 @@ Messages are always partitioned by device ID. This provides:
 - No configuration needed - automatic and deterministic
 
 **Topic Selection vs Partitioning**:
-- Topic selection (ShardBy) happens first - chooses which topic
+- Topic selection (TopicShardStrategy) happens first - chooses which topic
 - Partition assignment happens second - chooses which partition within that topic
 - Both use device ID by default, providing consistent routing at both levels
 
@@ -736,7 +736,7 @@ This simplified pattern matching is optimized for high-throughput message routin
 **Example Configuration**:
 ```yaml
 topicMap:
-  # Single topic - use Topic field (no Topics, no ShardBy)
+  # Single topic - use Topic field (no Topics, no TopicShardStrategy)
   - pattern: online
     topic: device-lifecycle
   - pattern: offline
@@ -768,9 +768,9 @@ topicMap:
 - `TopicMap` must not be empty (fails at startup)
 - Each route must match one of two valid combinations:
   1. `Pattern` set, `Topic` set, everything else empty/default (single topic route)
-  2. `Pattern` set, `Topics` set, `ShardBy` set, `Topic` empty (multi-topic route)
+  2. `Pattern` set, `Topics` set, `TopicShardStrategy` set, `Topic` empty (multi-topic route)
 - Invalid patterns are detected at startup (must follow simplified pattern syntax)
-- `ShardBy` must be one of: `"roundrobin"`, `"deviceid"`, or `"metadata:<fieldname>"` (when Topics is used)
+- `TopicShardStrategy` must be one of: `"roundrobin"`, `"deviceid"`, or `"metadata:<fieldname>"` (when Topics is used)
 - `Headers` map is optional (empty map is valid)
 - Header values starting with `wrp.` reference WRP message fields (see [wrp-go documentation](https://github.com/xmidt-org/wrp-go))
 - `CompressionCodec` must be one of the defined enum values
@@ -832,7 +832,7 @@ bufferUtilization := prometheus.NewGaugeFunc(
         Help: "Kafka buffer utilization (0.0-1.0)",
     },
     func() float64 {
-        current, max := dispatcher.BufferedRecords()
+        current, max := publisher.BufferedRecords()
         if max == 0 {
             return 0.0
         }
@@ -844,7 +844,7 @@ bufferUtilization := prometheus.NewGaugeFunc(
 **Option 2: [Prometheus](https://prometheus.io/) Collector** (for multiple metrics):
 ```go
 type bufferCollector struct {
-    dispatcher *wrpkafka.Dispatcher
+    publisher *wrpkafka.Publisher
     descUtil   *prometheus.Desc
     descCurrent *prometheus.Desc
 }
@@ -855,7 +855,7 @@ func (c *bufferCollector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (c *bufferCollector) Collect(ch chan<- prometheus.Metric) {
-    current, max := c.dispatcher.BufferedRecords()
+    current, max := c.publisher.BufferedRecords()
 
     // Report utilization percentage
     utilization := 0.0
@@ -875,7 +875,7 @@ go func() {
     ticker := time.NewTicker(5 * time.Second)
     defer ticker.Stop()
     for range ticker.C {
-        current, max := dispatcher.BufferedRecords()
+        current, max := publisher.BufferedRecords()
         if max > 0 {
             utilization := float64(current) / float64(max)
             bufferUtilGauge.Set(utilization)
@@ -888,7 +888,7 @@ go func() {
 **Option 4: On-Demand**:
 ```go
 // Check before critical operations
-current, max := dispatcher.BufferedRecords()
+current, max := publisher.BufferedRecords()
 if max > 0 && float64(current)/float64(max) > 0.9 {
     log.Warn("buffer nearly full", zap.Int("current", current), zap.Int("max", max))
 }
@@ -945,12 +945,15 @@ const (
     Accepted Outcome = iota
 
     // Queued - Message buffered but NOT confirmed
-    // For QoS 0-24: Fire-and-forget, may fail async
     // For QoS 25-74: Will retry async, callback on result
     Queued
 
+    // Attempted - Message attempted, outcome unknown
+    // For QoS 0-24: Fire-and-forget (may fail async, no retry)
+    Attempted
+
     // Dropped - Message dropped due to buffer full
-    // Only for QoS 0-24 when buffer is at capacity
+    // Only reported via async callback for QoS 0-24
     Dropped
 
     // Failed - Synchronous delivery failed
@@ -962,7 +965,7 @@ const (
 #### Usage Example
 
 ```go
-outcome, err := dispatcher.Produce(ctx, msg)
+outcome, err := publisher.Produce(ctx, msg)
 
 switch outcome {
 case wrpkafka.Accepted:
@@ -971,14 +974,17 @@ case wrpkafka.Accepted:
         zap.String("device", msg.Source))
 
 case wrpkafka.Queued:
-    // QoS 0-74 - buffered but not yet confirmed
-    // For QoS 0-24: fire-and-forget (may fail silently)
-    // For QoS 25-74: async retry until success
-    logger.Debug("message buffered",
+    // QoS 25-74 - buffered with async retry until success
+    logger.Debug("message buffered with retry",
+        zap.Int("qos", msg.QualityOfService))
+
+case wrpkafka.Attempted:
+    // QoS 0-24 - fire-and-forget (outcome unknown, may fail async)
+    logger.Debug("message attempted fire-and-forget",
         zap.Int("qos", msg.QualityOfService))
 
 case wrpkafka.Dropped:
-    // QoS 0-24 only - buffer was full
+    // Only via async callback - buffer was full
     logger.Warn("low priority message dropped",
         zap.String("device", msg.Source))
     droppedMessagesCounter.Inc()
@@ -1003,14 +1009,14 @@ case wrpkafka.Failed:
 
 ### 1.13 Integration Example (Talaria)
 
-This shows how to integrate the library into Talaria's existing dispatcher pattern. Other applications would follow similar patterns adapted to their architectures.
+This shows how to integrate the library into Talaria's existing event processing pattern. Other applications would follow similar patterns adapted to their architectures.
 
 **Kafka Adapter for device.Listener**:
 ```go
-// kafkaAdapter adapts wrpkafka.Dispatcher to Talaria's device.Listener interface
+// kafkaAdapter adapts wrpkafka.Publisher to Talaria's device.Listener interface
 type kafkaAdapter struct {
-    dispatcher *wrpkafka.Dispatcher
-    logger     *zap.Logger
+    publisher *wrpkafka.Publisher
+    logger    *zap.Logger
 }
 
 // OnDeviceEvent implements device.Listener interface
@@ -1022,7 +1028,7 @@ func (k *kafkaAdapter) OnDeviceEvent(event *device.Event) {
     }
 
     // Produce with QoS-aware routing (library handles QoS automatically)
-    outcome, err := k.dispatcher.Produce(context.Background(), event.Message)
+    outcome, err := k.publisher.Produce(context.Background(), event.Message)
 
     // Handle outcome based on application needs
     switch outcome {
@@ -1065,10 +1071,10 @@ func (o *Outbounder) Start(om OutboundMeasures) ([]device.Listener, error) {
     workerPool.Run()
     listeners = append(listeners, eventDispatcher)
 
-    // New Kafka dispatcher (if configured in this environment)
-    // The application decides whether to enable Kafka by creating the dispatcher or not
+    // New Kafka publisher (if configured in this environment)
+    // The application decides whether to enable Kafka by creating the publisher or not
     if kafkaConfig != nil {
-        kafkaDispatcher, err := wrpkafka.New(
+        kafkaPublisher, err := wrpkafka.New(
             wrpkafka.WithConfig(kafkaConfig),
             wrpkafka.WithLogger(logger),
             wrpkafka.WithMessagesPublished(func(eventType, topic, shardStrategy string) {
@@ -1085,23 +1091,23 @@ func (o *Outbounder) Start(om OutboundMeasures) ([]device.Listener, error) {
             return nil, err
         }
 
-        // Start the Kafka dispatcher
-        if err := kafkaDispatcher.Start(); err != nil {
+        // Start the Kafka publisher
+        if err := kafkaPublisher.Start(); err != nil {
             return nil, err
         }
 
         // Register shutdown hook to flush buffered messages on graceful shutdown
         lc.Append(fx.Hook{
             OnStop: func(ctx context.Context) error {
-                kafkaDispatcher.Stop() // Blocks until messages flushed or timeout
+                kafkaPublisher.Stop(ctx) // Blocks until messages flushed or timeout
                 return nil
             },
         })
 
         // Wrap in adapter to implement device.Listener
         adapter := &kafkaAdapter{
-            dispatcher: kafkaDispatcher,
-            logger:     logger,
+            publisher: kafkaPublisher,
+            logger:    logger,
         }
         listeners = append(listeners, adapter)
     }
@@ -1133,7 +1139,7 @@ device:
 
     # New Kafka configuration
     # Note: Whether Kafka is enabled is determined by the application
-    # (by whether it creates the dispatcher), not by configuration
+    # (by whether it creates the publisher), not by configuration
     kafka:
       # Broker connection settings
       # All brokers in the list should be part of the same Kafka cluster
@@ -1284,7 +1290,7 @@ var (
 
 **Buffer State via On-Demand Method**:
 
-Instead of a callback, buffer state is accessed via a method on the Dispatcher:
+Instead of a callback, buffer state is accessed via a method on the Publisher:
 
 **Method**:
 - `BufferedRecords() (current int, max int)` - Returns current and max buffer counts
@@ -1298,7 +1304,7 @@ bufferUtil := prometheus.NewGaugeFunc(
         Help: "Kafka buffer utilization (0.0-1.0)",
     },
     func() float64 {
-        current, max := dispatcher.BufferedRecords()
+        current, max := publisher.BufferedRecords()
         if max == 0 {
             return 0.0
         }
@@ -1313,7 +1319,7 @@ bufferCount := prometheus.NewGaugeFunc(
         Help: "Number of records currently buffered",
     },
     func() float64 {
-        current, _ := dispatcher.BufferedRecords()
+        current, _ := publisher.BufferedRecords()
         return float64(current)
     },
 )
@@ -1376,7 +1382,7 @@ Error handling is QoS-aware based on the message's QualityOfService field:
 
 #### Startup Validation
 - **Empty Topics List**: Fail at startup (invalid configuration)
-- **Invalid ShardBy Value**: Fail at startup (invalid configuration)
+- **Invalid TopicShardStrategy Value**: Fail at startup (invalid configuration)
 - **Invalid Configuration**: Fail at startup if TopicMap is empty, patterns are invalid, or TopicRoute combinations are invalid
 - **Authentication Failure**: Fail at Start() (don't accept events until connected)
 
@@ -1409,8 +1415,8 @@ Error handling is QoS-aware based on the message's QualityOfService field:
        - Only two valid combinations (single topic vs multi-topic)
        - Topic/Topics mutual exclusivity
        - Empty Topics list in multi-topic route
-       - ShardBy required for multi-topic, empty for single-topic
-       - Invalid ShardBy values (must be `"roundrobin"`, `"deviceid"`, or `"metadata:<field>"`)
+       - TopicShardStrategy required for multi-topic, empty for single-topic
+       - Invalid TopicShardStrategy values (must be `"roundrobin"`, `"deviceid"`, or `"metadata:<field>"`)
      - **Enum validation**:
        - Invalid CompressionCodec enum values
        - Invalid Acks enum values
@@ -1418,7 +1424,7 @@ Error handling is QoS-aware based on the message's QualityOfService field:
        - Empty header keys
        - WRP field name validation (wrp.* references)
      - **Numeric fields**: Zero/negative handling (no validation errors, defined behaviors)
-     - IgnoreCase flag behavior
+     - CaseInsensitive flag behavior
    - Options pattern:
      - **WithConfig() required**: New() returns error if not called
      - **WithLogger() optional**: Defaults to zap.NewNop() if not provided
@@ -1450,7 +1456,7 @@ Error handling is QoS-aware based on the message's QualityOfService field:
    - Multi-topic routing with different strategies
 
 3. **Load Tests**:
-   - Measure throughput vs HTTP dispatcher
+   - Measure throughput vs HTTP delivery
    - Verify backpressure handling
    - Memory usage under load
    - Performance of glob matching at scale
@@ -1514,13 +1520,13 @@ Error handling is QoS-aware based on the message's QualityOfService field:
    - Monitoring (lag, throughput, errors)
 
 2. **Migration Path** (for existing deployments):
-   - Deploy code with Kafka dispatcher creation commented out or conditionally disabled
+   - Deploy code with Kafka publisher creation commented out or conditionally disabled
    - Enable via feature flag or environment-specific configuration
    - Monitor metrics and compare with existing delivery mechanisms
    - Gradually increase adoption across environments
 
 3. **Rollback Strategy**:
-   - Remove dispatcher creation from startup code or disable via feature flag
+   - Remove publisher creation from startup code or disable via feature flag
    - Restart application instances
    - No configuration file changes needed (config remains valid)
 
@@ -1538,14 +1544,14 @@ This library is initially designed for integration with Talaria, an xmidt-org We
 
 ### 4.1 Talaria's Current Event Flow
 1. **Device Events** → Devices generate events via WebSocket, and Talaria generates some events internally (e.g., online/offline)
-2. **Dispatcher Pattern** → `device.Listener` interface processes events through:
+2. **Event Processing Pattern** → `device.Listener` interface processes events through:
    - `eventDispatcher`: Converts events to HTTP requests, queues them
    - `ackDispatcher`: Handles QOS acknowledgments back to devices
 3. **WorkerPool** → Processes outbound HTTP request queue (100 workers default)
 4. **HTTP Transport** → Sends to configured endpoints (typically Caduceus)
 
 ### 4.2 Key Integration Points
-- **Dispatcher interface**: Simple `device.Listener` interface with `OnDeviceEvent(*device.Event)` method
+- **Listener interface**: Simple `device.Listener` interface with `OnDeviceEvent(*device.Event)` method
   - Applications implement a thin adapter that extracts `wrp.Message` from `device.Event` and calls `Send()` or `Transfer()`
   - The library works directly with `wrp.Message` for maximum flexibility
   - Other applications can provide their own event sources
@@ -1569,96 +1575,16 @@ This library is initially designed for integration with Talaria, an xmidt-org We
 4. **Hard-code [Prometheus](https://prometheus.io/)**: Rejected - limits reusability, callback interface more flexible
 5. **Traditional constructor with many parameters**: Rejected - options pattern more extensible
 
-## 7. Implementation Phases
+## 7. Success Criteria
 
-### 7.1 Phase 1: Core Library Implementation
-- [ ] Add [franz-go](https://github.com/twmb/franz-go) and [wrp-go](https://github.com/xmidt-org/wrp-go) dependencies
-- [ ] Define enum types (CompressionCodec, Acks) with constants
-- [ ] Implement options pattern (WithConfig, WithLogger, individual metric options)
-- [ ] Implement simplified pattern matching for topic routing
-  - [ ] Catch-all: `*` matches everything
-  - [ ] Exact match: pattern == event type
-  - [ ] Prefix match: pattern ending with `*` matches prefix
-  - [ ] Escaped asterisk: `\*` matches literal `*` character
-  - [ ] Case-sensitive matching by default
-  - [ ] Case-insensitive matching when IgnoreCase flag is set
-- [ ] Implement topic selection strategies:
-  - [ ] Single topic (no sharding)
-  - [ ] Round-robin with atomic counters stored in TopicRoute
-  - [ ] Device ID sharding with FNV hashing
-  - [ ] Metadata field sharding with fallback
-- [ ] Initialize round-robin counters on TopicRoute during `New()` for routes with `ShardBy="roundrobin"`
-- [ ] Implement configurable header extraction (wrp.* references + literal strings, see wrp-go)
-- [ ] Implement `Config` configuration struct with:
-  - [ ] Topic/Topics mutual exclusivity validation
-  - [ ] IgnoreCase field support
-  - [ ] CompressionCodec and Acks enum validation
-  - [ ] MaxBufferedRecords, RequestTimeout, Linger zero/negative handling
-- [ ] Implement `Dispatcher` with:
-  - [ ] Thread-safe message publishing
-  - [ ] Start() and Stop() lifecycle methods
-  - [ ] Produce(ctx, msg) (Outcome, error) method with QoS-aware routing:
-    - [ ] QoS 0-24: Uses franz-go TryProduce, returns Dropped/Queued
-    - [ ] QoS 25-74: Uses franz-go Produce, returns Queued
-    - [ ] QoS 75-99: Uses franz-go ProduceSync, returns Accepted/Failed
-  - [ ] Outcome type with constants: Accepted, Queued, Dropped, Failed
-  - [ ] Promise callback integration with application metrics callbacks
-  - [ ] BufferedRecords() method returns (current int, max int)
-  - [ ] Use client.BufferedProduceRecords() for current count
-  - [ ] Return configured MaxBufferedRecords as max value
-- [ ] Implement device ID extraction from WRP Source field (see wrp-go)
-- [ ] Add configuration validation (TopicRoute combinations, enum values, patterns)
-- [ ] Implement `New()` constructor with option application and validation
-
-### 7.2 Phase 2: Quality & Testing
-- [ ] Comprehensive error handling:
-  - [ ] No-match scenarios
-  - [ ] Header extraction errors
-  - [ ] Missing metadata field fallback
-  - [ ] Empty topics list
-  - [ ] Nil callback safety
-- [ ] Unit tests (>80% coverage):
-  - [ ] Options pattern (Config, Logger, Measures options)
-  - [ ] Option precedence and validation
-  - [ ] Glob matching with various patterns
-  - [ ] All topic selection strategies
-  - [ ] Device ID extraction
-  - [ ] Header extraction (wrp.* fields, literal strings, missing/empty fields)
-  - [ ] Metadata field extraction and fallback
-  - [ ] Configuration validation (empty TopicMap, Topic/Topics mutual exclusivity, invalid patterns, etc.)
-  - [ ] Metric callback invocations (nil-safe, correct parameters)
-- [ ] API documentation (GoDoc)
-- [ ] Usage examples and README
-
-### 7.3 Phase 3: Integration & Performance
-- [ ] SASL/TLS authentication support
-- [ ] Integration tests with testcontainers
-  - [ ] All sharding strategies
-  - [ ] Partition assignment verification
-  - [ ] Message ordering verification
-- [ ] Performance benchmarking
-  - [ ] Throughput testing
-  - [ ] Latency measurements
-  - [ ] Memory profiling under load
-  - [ ] Comparison of sharding strategies
-
-### 7.4 Phase 4: Talaria Integration
-- [ ] Create integration example code
-- [ ] Talaria-specific configuration documentation
-- [ ] Deployment guide for Talaria
-- [ ] Monitoring/alerting recommendations
-- [ ] Canary deployment in staging environment
-
-## 8. Success Criteria
-
-### 8.1 Library Quality
+### 7.1 Library Quality
 1. **Performance**: High-throughput event publishing with low latency, suitable for production workloads
 2. **Reliability**: Handle network failures gracefully with configurable retry behavior
 3. **Testability**: Comprehensive unit and integration test coverage
 4. **Documentation**: Complete API documentation and usage examples
 5. **Minimal Dependencies**: No hard dependencies on metrics frameworks, uses callback interface for observability
 
-### 8.2 Talaria Integration Success
+### 7.2 Talaria Integration Success
 1. Zero impact on existing HTTP delivery performance when running in parallel
 2. Comprehensive metrics visible in monitoring system
 3. Successful canary deployment in staging environment
