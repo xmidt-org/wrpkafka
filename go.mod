@@ -5,7 +5,7 @@ go 1.25.2
 require (
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go/modules/kafka v0.39.0
-	github.com/twmb/franz-go v1.20.2
+	github.com/twmb/franz-go v1.20.4
 	github.com/xmidt-org/eventor v1.0.23
 	github.com/xmidt-org/wrp-go/v5 v5.4.0
 )
