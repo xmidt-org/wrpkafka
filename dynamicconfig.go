@@ -64,6 +64,40 @@ func (dc *DynamicConfig) match(msg *wrp.Message) (string, TopicShardStrategy, er
 	)
 }
 
+func (dc *DynamicConfig) matches(msg *wrp.Message) ([]string, []TopicShardStrategy, error) {
+	var topics []string
+	var shardStrategy []TopicShardStrategy
+
+	locator, err := wrp.ParseLocator(msg.Destination)
+	if err != nil {
+		return nil, nil, errors.Join(ErrValidation, err)
+	}
+
+	for _, route := range dc.TopicMap {
+		if !route.matcher.matches(locator.Authority) {
+			continue
+		}
+
+		topic := route.selectTopic(msg)
+		if topic == "" {
+			return nil, nil, errors.New("no topic selected for message")
+		}
+
+		// Success
+		topics = append(topics, topic)
+		shardStrategy = append(shardStrategy, route.TopicShardStrategy)
+	}
+
+	if len(topics) == 0 {
+		return nil, nil, errors.Join(
+			ErrNoTopicMatch,
+			fmt.Errorf("no topic route matched for event type '%s'", locator.Authority),
+		)
+	}
+
+	return topics, shardStrategy, nil
+}
+
 // headers builds the Kafka record headers from the DynamicConfig and WRP message.
 // Headers can be literal values or wrp.* references to WRP message fields.
 // For multi-valued WRP fields (like PartnerIDs), creates multiple headers with the same key.
