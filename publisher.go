@@ -313,38 +313,23 @@ func (p *Publisher) Produce(ctx context.Context, msg *wrp.Message) (Outcome, err
 
 	// Set topic and shard strategy from the first record for event reporting (could be multiple topics)
 	event.Topic = records[0].Topic
-	if len(shardStrategies) > 0 {
-		event.TopicShardStrategy = string(shardStrategies[0])
-	}
+	event.TopicShardStrategy = string(shardStrategies[0])
 	qos := msg.QualityOfService
 
-	// QoS routing
-	if qos <= 24 {
-		// Low QoS: Fire-and-forget with TryProduce
-		for i, record := range records {
-			// Create a copy of event for each record to track individual outcomes
-			recordEvent := event
-			recordEvent.Topic = record.Topic
-			if i < len(shardStrategies) {
-				recordEvent.TopicShardStrategy = string(shardStrategies[i])
-			}
+	for i, record := range records {
+		// Create a copy of event for each record to track individual outcomes
+		recordEvent := event
+		recordEvent.Topic = record.Topic
+		recordEvent.TopicShardStrategy = string(shardStrategies[i])
+
+		if qos <= 24 {
+			// Low QoS: Fire-and-forget with TryProduce
 			client.TryProduce(ctx, record, func(r *kgo.Record, err error) {
 				p.dispatchEvent(&recordEvent, startTime, err)
 			})
-		}
-
-		// Don't dispatchEvent() here - it's done in the callbacks.
-		return Attempted, nil
-
-	} else if qos <= 74 {
-		// Medium QoS: Async with retry, block if buffer full
-		for i, record := range records {
-			// Create a copy of event for each record to track individual outcomes
-			recordEvent := event
-			recordEvent.Topic = record.Topic
-			if i < len(shardStrategies) {
-				recordEvent.TopicShardStrategy = string(shardStrategies[i])
-			}
+			return Attempted, nil
+		} else if qos <= 74 {
+			// Medium QoS: Async with retry, block if buffer full
 			// Provide callback to capture async errors (retries exhausted, timeout, etc.)
 			client.Produce(ctx, record, func(r *kgo.Record, err error) {
 				if err != nil {
@@ -364,19 +349,9 @@ func (p *Publisher) Produce(ctx context.Context, msg *wrp.Message) (Outcome, err
 
 			// Optimistically dispatch success event (actual result delivered via callback)
 			p.dispatchEvent(&recordEvent, startTime, nil)
-		}
-		return Queued, nil
-
-	} else {
-		// High QoS: Sync with confirmation
-		for i, record := range records {
-			// Create a copy of event for each record to track individual outcomes
-			recordEvent := event
-			recordEvent.Topic = record.Topic
-			if i < len(shardStrategies) {
-				recordEvent.TopicShardStrategy = string(shardStrategies[i])
-			}
-
+			return Queued, nil
+		} else {
+			// High QoS: Sync with confirmation
 			results := client.ProduceSync(ctx, record)
 
 			if len(results) > 0 && results[0].Err != nil {
@@ -388,9 +363,13 @@ func (p *Publisher) Produce(ctx context.Context, msg *wrp.Message) (Outcome, err
 
 			// Success
 			p.dispatchEvent(&recordEvent, startTime, nil)
+			return Accepted, nil
 		}
-		return Accepted, nil
 	}
+	// Should not reach here, but return error as a fallback
+	err = errors.New("no records created")
+	p.dispatchEvent(&event, startTime, err)
+	return Failed, err
 }
 
 // eventType extracts the event type from a WRP message's Destination field.
