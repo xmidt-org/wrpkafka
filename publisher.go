@@ -311,9 +311,6 @@ func (p *Publisher) Produce(ctx context.Context, msg *wrp.Message) (Outcome, err
 		return Failed, err
 	}
 
-	// Set topic and shard strategy from the first record for event reporting (could be multiple topics)
-	event.Topic = records[0].Topic
-	event.TopicShardStrategy = string(shardStrategies[0])
 	qos := msg.QualityOfService
 
 	for i, record := range records {
