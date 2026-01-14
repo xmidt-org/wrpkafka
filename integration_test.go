@@ -49,6 +49,43 @@ func TestIntegration_BasicPublish(t *testing.T) {
 	verifyWRPMessage(t, records[0], msg)
 }
 
+// TestIntegration_BasicPublish_MultipleTopics tests basic message publishing to multiple Kafka topics.
+//
+// Verifies:
+// - Messages published to multiple topics with high QoS
+// - Verification of messages content in Kafka
+func TestIntegration_BasicPublish_MultipleTopics(t *testing.T) {
+	t.Parallel()
+	_, broker := setupKafka(t)
+
+	// Create publisher
+	pub := createTestPublisher(t, broker, []wrpkafka.TopicRoute{
+		{Pattern: "device-*", Topic: "device-events"},
+		{Pattern: "*", Topic: "default-events"},
+	})
+
+	err := pub.Start()
+	require.NoError(t, err)
+	defer pub.Stop(context.Background())
+
+	// Publish messages
+	msg := createTestMessage("device-status", "mac:112233445566", 75)
+
+	outcome, err := pub.Produce(context.Background(), msg)
+	require.NoError(t, err)
+	assert.Equal(t, wrpkafka.Accepted, outcome)
+
+	// Verify messages in Kafka
+	records := consumeMessages(t, broker, "device-events", messageConsumeWait)
+	require.Len(t, records, 1, "Expected exactly 1 message in Kafka")
+	verifyWRPMessage(t, records[0], msg)
+
+	records = consumeMessages(t, broker, "default-events", messageConsumeWait)
+	require.Len(t, records, 1, "Expected exactly 1 message in Kafka")
+	verifyWRPMessage(t, records[0], msg)
+
+}
+
 // TestIntegration_QoSLevels tests all three QoS levels.
 //
 // Verifies:

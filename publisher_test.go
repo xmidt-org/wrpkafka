@@ -172,6 +172,43 @@ func TestProduceQoS(t *testing.T) {
 	})
 }
 
+// TestProduceMultipleTopics tests routing to multiple topics.
+func TestProduceMultipleTopics(t *testing.T) {
+	t.Parallel()
+	mockClient := &mockKafkaClient{}
+	mockClient.On("TryProduce", mock.Anything, mock.Anything, mock.Anything).Return()
+	mockClient.On("Produce", mock.Anything, mock.Anything, mock.Anything).Return()
+
+	p := newTestPublisher(DynamicConfig{TopicMap: []TopicRoute{
+		{Pattern: "device-status", Topic: "device-events"},
+		{Pattern: "*", Topic: "default-events"},
+	}})
+	p.clientMu.Lock()
+	p.client = mockClient
+	p.clientMu.Unlock()
+
+	msg := &wrp.Message{
+		Type:             wrp.SimpleEventMessageType,
+		Source:           "mac:112233445566",
+		Destination:      "event:device-status/mac:112233445566",
+		QualityOfService: 50, // medium QoS
+	}
+
+	outcome, err := p.Produce(context.Background(), msg)
+	assert.NoError(t, err)
+	assert.Equal(t, Queued, outcome) // medium QoS response
+
+	// Expect Produce called for device-events
+	mockClient.AssertCalled(t, "Produce", mock.Anything, mock.MatchedBy(func(record *kgo.Record) bool {
+		return record.Topic == "device-events"
+	}), mock.Anything)
+
+	// Expect Produce called for default-events
+	mockClient.AssertCalled(t, "Produce", mock.Anything, mock.MatchedBy(func(record *kgo.Record) bool {
+		return record.Topic == "default-events"
+	}), mock.Anything)
+}
+
 // TestProduceErrors tests error handling.
 func TestProduceErrors(t *testing.T) {
 	t.Parallel()

@@ -324,7 +324,6 @@ func (p *Publisher) Produce(ctx context.Context, msg *wrp.Message) (Outcome, err
 			client.TryProduce(ctx, record, func(r *kgo.Record, err error) {
 				p.dispatchEvent(&recordEvent, startTime, err)
 			})
-			return Attempted, nil
 		} else if qos <= 74 {
 			// Medium QoS: Async with retry, block if buffer full
 			// Provide callback to capture async errors (retries exhausted, timeout, etc.)
@@ -346,13 +345,12 @@ func (p *Publisher) Produce(ctx context.Context, msg *wrp.Message) (Outcome, err
 
 			// Optimistically dispatch success event (actual result delivered via callback)
 			p.dispatchEvent(&recordEvent, startTime, nil)
-			return Queued, nil
 		} else {
 			// High QoS: Sync with confirmation
 			results := client.ProduceSync(ctx, record)
 
 			if len(results) > 0 && results[0].Err != nil {
-				// Broker error
+				// Broker error - for sync operations, we still return immediately on error
 				err := fmt.Errorf("broker rejected message: %w", results[0].Err)
 				p.dispatchEvent(&recordEvent, startTime, err)
 				return Failed, err
@@ -360,13 +358,17 @@ func (p *Publisher) Produce(ctx context.Context, msg *wrp.Message) (Outcome, err
 
 			// Success
 			p.dispatchEvent(&recordEvent, startTime, nil)
-			return Accepted, nil
 		}
 	}
-	// Should not reach here, but return error as a fallback
-	err = errors.New("no records created")
-	p.dispatchEvent(&event, startTime, err)
-	return Failed, err
+
+	// Return appropriate outcome based on QoS level
+	if qos <= 24 {
+		return Attempted, nil
+	} else if qos <= 74 {
+		return Queued, nil
+	} else {
+		return Accepted, nil
+	}
 }
 
 // eventType extracts the event type from a WRP message's Destination field.
