@@ -316,8 +316,9 @@ func (p *Publisher) Produce(ctx context.Context, msg *wrp.Message) (Outcome, err
 	var returnOutcome Outcome
 
 	for i, record := range records {
-		// Create a copy of event for each record to track individual outcomes
-		recordEvent := event
+		recordEvent := PublishEvent{
+			EventType: eventType(msg),
+		}
 		recordEvent.Topic = record.Topic
 		recordEvent.TopicShardStrategy = string(shardStrategies[i])
 
