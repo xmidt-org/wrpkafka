@@ -5,6 +5,7 @@ package wrpkafka
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -438,7 +439,55 @@ func TestConfigConcurrency(t *testing.T) {
 	assert.NotEmpty(t, cfg.TopicMap)
 }
 
-// TestProduceTableDriven provides comprehensive table-driven tests for the Produce function
+// TestProduceContextCancellation tests context cancellation behavior
+func TestProduceContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	p := newTestPublisher(DynamicConfig{
+		TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+	})
+
+	msg := &wrp.Message{
+		Type:             wrp.SimpleEventMessageType,
+		Source:           "mac:112233445566",
+		Destination:      "event:test",
+		QualityOfService: 50,
+	}
+
+	result, err := p.Produce(ctx, msg)
+
+	assert.Equal(t, Failed, result)
+	assert.Error(t, err)
+	assert.Equal(t, context.Canceled, err)
+}
+
+// TestProduceNotStarted tests behavior when client is not started
+func TestProduceNotStarted(t *testing.T) {
+	t.Parallel()
+
+	p := newTestPublisher(DynamicConfig{
+		TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+	})
+	// Don't set client - simulates not started
+
+	msg := &wrp.Message{
+		Type:             wrp.SimpleEventMessageType,
+		Source:           "mac:112233445566",
+		Destination:      "event:test",
+		QualityOfService: 50,
+	}
+
+	result, err := p.Produce(context.Background(), msg)
+
+	assert.Equal(t, Failed, result)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrNotStarted)
+}
+
+// TestProduceTableDriven provides table-driven tests for the Produce function
 func TestProduceTableDriven(t *testing.T) {
 	t.Parallel()
 
@@ -720,53 +769,174 @@ func TestProduceTableDriven(t *testing.T) {
 	}
 }
 
-// TestProduceContextCancellation tests context cancellation behavior
-func TestProduceContextCancellation(t *testing.T) {
+// TestProduceAsyncErrors provides table-driven tests for async error handling
+// in the Produce function
+func TestProduceAsyncErrors(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately
-
-	p := newTestPublisher(DynamicConfig{
-		TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
-	})
-
-	msg := &wrp.Message{
-		Type:             wrp.SimpleEventMessageType,
-		Source:           "mac:112233445566",
-		Destination:      "event:test",
-		QualityOfService: 50,
+	tests := []struct {
+		name                  string
+		msg                   *wrp.Message
+		dynamicConfig         DynamicConfig
+		simulatedError        error
+		expectedResult        Outcome
+		expectedError         string
+		expectedEventCalls    int // Number of events expected to be dispatched
+		expectedSuccessEvents int // Number of success events
+		expectedErrorEvents   int // Number of error events
+	}{
+		{
+			name: "medium QoS single topic - async retry exhausted error",
+			msg: &wrp.Message{
+				Type:             wrp.SimpleEventMessageType,
+				Source:           "mac:112233445566",
+				Destination:      "event:test",
+				QualityOfService: 50,
+			},
+			dynamicConfig: DynamicConfig{
+				TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+			},
+			simulatedError:        errors.New("retries exhausted"),
+			expectedResult:        Queued,
+			expectedError:         "",
+			expectedEventCalls:    2, // 1 success + 1 async error
+			expectedSuccessEvents: 1,
+			expectedErrorEvents:   1,
+		},
+		{
+			name: "medium QoS single topic - async timeout error",
+			msg: &wrp.Message{
+				Type:             wrp.SimpleEventMessageType,
+				Source:           "mac:112233445566",
+				Destination:      "event:test",
+				QualityOfService: 60,
+			},
+			dynamicConfig: DynamicConfig{
+				TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+			},
+			simulatedError:        context.DeadlineExceeded,
+			expectedResult:        Queued,
+			expectedError:         "",
+			expectedEventCalls:    2, // 1 success + 1 async error
+			expectedSuccessEvents: 1,
+			expectedErrorEvents:   1,
+		},
+		{
+			name: "medium QoS single topic - async success (no error)",
+			msg: &wrp.Message{
+				Type:             wrp.SimpleEventMessageType,
+				Source:           "mac:112233445566",
+				Destination:      "event:test",
+				QualityOfService: 25,
+			},
+			dynamicConfig: DynamicConfig{
+				TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+			},
+			simulatedError:        nil, // No error - success case
+			expectedResult:        Queued,
+			expectedError:         "",
+			expectedEventCalls:    1, // 1 success only
+			expectedSuccessEvents: 1,
+			expectedErrorEvents:   0,
+		},
 	}
 
-	result, err := p.Produce(ctx, msg)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	assert.Equal(t, Failed, result)
-	assert.Error(t, err)
-	assert.Equal(t, context.Canceled, err)
+			// Setup event tracking
+			var eventMu sync.Mutex
+			var capturedEvents []PublishEvent
+			var successEventCount, errorEventCount int
 
-	// Cleanup
-	_ = cancel // satisfy linter
-}
+			eventListener := func(event *PublishEvent) {
+				eventMu.Lock()
+				defer eventMu.Unlock()
+				capturedEvents = append(capturedEvents, *event)
+				if event.Error == nil {
+					successEventCount++
+				} else {
+					errorEventCount++
+				}
+			}
 
-// TestProduceNotStarted tests behavior when client is not started
-func TestProduceNotStarted(t *testing.T) {
-	t.Parallel()
+			// Setup mock client
+			mockClient := &mockKafkaClient{}
+			mockClient.On("Produce", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+				// Get the callback function and call it with the simulated error
+				callback := args.Get(2).(func(*kgo.Record, error))
+				record := args.Get(1).(*kgo.Record)
 
-	p := newTestPublisher(DynamicConfig{
-		TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
-	})
-	// Don't set client - simulates not started
+				// Simulate async callback
+				go func() {
+					time.Sleep(1 * time.Millisecond) // Simulate async
+					callback(record, tt.simulatedError)
+				}()
+			}).Return()
 
-	msg := &wrp.Message{
-		Type:             wrp.SimpleEventMessageType,
-		Source:           "mac:112233445566",
-		Destination:      "event:test",
-		QualityOfService: 50,
+			// Setup publisher
+			p := newTestPublisher(tt.dynamicConfig)
+			p.clientMu.Lock()
+			p.client = mockClient
+			p.clientMu.Unlock()
+
+			// Add event listener
+			cancel := p.AddPublishEventListener(eventListener)
+			defer cancel()
+
+			// Execute
+			result, err := p.Produce(context.Background(), tt.msg)
+
+			// Assert immediate results
+			assert.Equal(t, tt.expectedResult, result)
+			if tt.expectedError != "" {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedError)
+			} else {
+				assert.NoError(t, err)
+			}
+
+			// Wait for async callbacks to complete
+			assert.Eventually(t, func() bool {
+				eventMu.Lock()
+				defer eventMu.Unlock()
+				return len(capturedEvents) == tt.expectedEventCalls
+			}, time.Second, 10*time.Millisecond, "Expected %d events, got %d", tt.expectedEventCalls, len(capturedEvents))
+
+			// Verify event counts
+			eventMu.Lock()
+			assert.Equal(t, tt.expectedSuccessEvents, successEventCount, "Success event count mismatch")
+			assert.Equal(t, tt.expectedErrorEvents, errorEventCount, "Error event count mismatch")
+
+			// Verify error events
+			if tt.expectedErrorEvents > 0 && tt.simulatedError != nil {
+				for _, event := range capturedEvents {
+					if event.Error != nil {
+						assert.Equal(t, tt.simulatedError, event.Error, "Error event should contain the simulated error")
+						assert.NotEmpty(t, event.ErrorType, "Error event should have ErrorType set")
+						assert.True(t, event.Duration > 0, "Error event should have Duration > 0")
+					}
+				}
+			}
+
+			// Verify success events
+			if tt.expectedSuccessEvents > 0 {
+				successFound := false
+				for _, event := range capturedEvents {
+					if event.Error == nil {
+						successFound = true
+						assert.Empty(t, event.ErrorType, "Success event should have empty ErrorType")
+						assert.True(t, event.Duration > 0, "Success event should have Duration > 0")
+						break
+					}
+				}
+				assert.True(t, successFound, "At least one success event should be found")
+			}
+			eventMu.Unlock()
+
+			// Verify mock expectations
+			mockClient.AssertExpectations(t)
+		})
 	}
-
-	result, err := p.Produce(context.Background(), msg)
-
-	assert.Equal(t, Failed, result)
-	assert.Error(t, err)
-	assert.ErrorIs(t, err, ErrNotStarted)
 }
