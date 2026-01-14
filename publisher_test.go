@@ -172,43 +172,6 @@ func TestProduceQoS(t *testing.T) {
 	})
 }
 
-// TestProduceMultipleTopics tests routing to multiple topics.
-func TestProduceMultipleTopics(t *testing.T) {
-	t.Parallel()
-	mockClient := &mockKafkaClient{}
-	mockClient.On("TryProduce", mock.Anything, mock.Anything, mock.Anything).Return()
-	mockClient.On("Produce", mock.Anything, mock.Anything, mock.Anything).Return()
-
-	p := newTestPublisher(DynamicConfig{TopicMap: []TopicRoute{
-		{Pattern: "device-status", Topic: "device-events"},
-		{Pattern: "*", Topic: "default-events"},
-	}})
-	p.clientMu.Lock()
-	p.client = mockClient
-	p.clientMu.Unlock()
-
-	msg := &wrp.Message{
-		Type:             wrp.SimpleEventMessageType,
-		Source:           "mac:112233445566",
-		Destination:      "event:device-status/mac:112233445566",
-		QualityOfService: 50, // medium QoS
-	}
-
-	outcome, err := p.Produce(context.Background(), msg)
-	assert.NoError(t, err)
-	assert.Equal(t, Queued, outcome) // medium QoS response
-
-	// Expect Produce called for device-events
-	mockClient.AssertCalled(t, "Produce", mock.Anything, mock.MatchedBy(func(record *kgo.Record) bool {
-		return record.Topic == "device-events"
-	}), mock.Anything)
-
-	// Expect Produce called for default-events
-	mockClient.AssertCalled(t, "Produce", mock.Anything, mock.MatchedBy(func(record *kgo.Record) bool {
-		return record.Topic == "default-events"
-	}), mock.Anything)
-}
-
 // TestProduceErrors tests error handling.
 func TestProduceErrors(t *testing.T) {
 	t.Parallel()
@@ -247,6 +210,23 @@ func TestProduceErrors(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // cancel immediately
+
+		msg := &wrp.Message{Destination: "event:test"}
+
+		outcome, err := p.Produce(ctx, msg)
+		assert.Error(t, err)
+		assert.Equal(t, Failed, outcome)
+	})
+
+	t.Run("no records", func(t *testing.T) {
+		t.Parallel()
+		p := newTestPublisher(DynamicConfig{TopicMap: []TopicRoute{{Pattern: "*", Topic: "t"}}})
+		p.clientMu.Lock()
+		p.client = &mockKafkaClient{}
+		p.clientMu.Unlock()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 
 		msg := &wrp.Message{Destination: "event:test"}
 
@@ -456,4 +436,337 @@ func TestConfigConcurrency(t *testing.T) {
 	cfg := p.dynamicConfig.Load()
 	assert.NotNil(t, cfg)
 	assert.NotEmpty(t, cfg.TopicMap)
+}
+
+// TestProduceTableDriven provides comprehensive table-driven tests for the Produce function
+func TestProduceTableDriven(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		msg            *wrp.Message
+		dynamicConfig  DynamicConfig
+		mockSetup      func(m *mockKafkaClient)
+		expectedResult Outcome
+		expectedError  string
+		expectCalls    map[string]int // method name -> call count
+	}{
+		{
+			name: "low QoS single topic success",
+			msg: &wrp.Message{
+				Type:             wrp.SimpleEventMessageType,
+				Source:           "mac:112233445566",
+				Destination:      "event:test",
+				QualityOfService: 10,
+			},
+			dynamicConfig: DynamicConfig{
+				TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+			},
+			mockSetup: func(m *mockKafkaClient) {
+				m.On("TryProduce", mock.Anything, mock.Anything, mock.Anything).Return()
+			},
+			expectedResult: Attempted,
+			expectedError:  "",
+			expectCalls:    map[string]int{"TryProduce": 1},
+		},
+		{
+			name: "low QoS multiple topics success",
+			msg: &wrp.Message{
+				Type:             wrp.SimpleEventMessageType,
+				Source:           "mac:112233445566",
+				Destination:      "event:test",
+				QualityOfService: 0,
+			},
+			dynamicConfig: DynamicConfig{
+				TopicMap: []TopicRoute{
+					{Pattern: "test", Topic: "topic1"},
+					{Pattern: "test", Topic: "topic2"},
+				},
+			},
+			mockSetup: func(m *mockKafkaClient) {
+				m.On("TryProduce", mock.Anything, mock.Anything, mock.Anything).Return()
+			},
+			expectedResult: Attempted,
+			expectedError:  "",
+			expectCalls:    map[string]int{"TryProduce": 2},
+		},
+		{
+			name: "medium QoS single topic success",
+			msg: &wrp.Message{
+				Type:             wrp.SimpleEventMessageType,
+				Source:           "mac:112233445566",
+				Destination:      "event:test",
+				QualityOfService: 50,
+			},
+			dynamicConfig: DynamicConfig{
+				TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+			},
+			mockSetup: func(m *mockKafkaClient) {
+				m.On("Produce", mock.Anything, mock.Anything, mock.Anything).Return()
+			},
+			expectedResult: Queued,
+			expectedError:  "",
+			expectCalls:    map[string]int{"Produce": 1},
+		},
+		{
+			name: "medium QoS multiple topics success",
+			msg: &wrp.Message{
+				Type:             wrp.SimpleEventMessageType,
+				Source:           "mac:112233445566",
+				Destination:      "event:test",
+				QualityOfService: 74,
+			},
+			dynamicConfig: DynamicConfig{
+				TopicMap: []TopicRoute{
+					{Pattern: "test", Topic: "topic1"},
+					{Pattern: "test", Topic: "topic2"},
+					{Pattern: "test", Topic: "topic3"},
+				},
+			},
+			mockSetup: func(m *mockKafkaClient) {
+				m.On("Produce", mock.Anything, mock.Anything, mock.Anything).Return()
+			},
+			expectedResult: Queued,
+			expectedError:  "",
+			expectCalls:    map[string]int{"Produce": 3},
+		},
+		{
+			name: "high QoS single topic success",
+			msg: &wrp.Message{
+				Type:             wrp.SimpleEventMessageType,
+				Source:           "mac:112233445566",
+				Destination:      "event:test",
+				QualityOfService: 99,
+			},
+			dynamicConfig: DynamicConfig{
+				TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+			},
+			mockSetup: func(m *mockKafkaClient) {
+				m.On("ProduceSync", mock.Anything, mock.Anything).Return(kgo.ProduceResults{
+					{Record: &kgo.Record{Topic: "topic1"}, Err: nil},
+				})
+			},
+			expectedResult: Accepted,
+			expectedError:  "",
+			expectCalls:    map[string]int{"ProduceSync": 1},
+		},
+		{
+			name: "high QoS multiple topics success",
+			msg: &wrp.Message{
+				Type:             wrp.SimpleEventMessageType,
+				Source:           "mac:112233445566",
+				Destination:      "event:test",
+				QualityOfService: 75,
+			},
+			dynamicConfig: DynamicConfig{
+				TopicMap: []TopicRoute{
+					{Pattern: "test", Topic: "topic1"},
+					{Pattern: "test", Topic: "topic2"},
+				},
+			},
+			mockSetup: func(m *mockKafkaClient) {
+				m.On("ProduceSync", mock.Anything, mock.Anything).Return(kgo.ProduceResults{
+					{Record: &kgo.Record{Topic: "topic1"}, Err: nil},
+				}).Times(2)
+			},
+			expectedResult: Accepted,
+			expectedError:  "",
+			expectCalls:    map[string]int{"ProduceSync": 2},
+		},
+		{
+			name: "high QoS sync failure",
+			msg: &wrp.Message{
+				Type:             wrp.SimpleEventMessageType,
+				Source:           "mac:112233445566",
+				Destination:      "event:test",
+				QualityOfService: 80,
+			},
+			dynamicConfig: DynamicConfig{
+				TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+			},
+			mockSetup: func(m *mockKafkaClient) {
+				m.On("ProduceSync", mock.Anything, mock.Anything).Return(kgo.ProduceResults{
+					{Record: &kgo.Record{Topic: "topic1"}, Err: assert.AnError},
+				})
+			},
+			expectedResult: Failed,
+			expectedError:  "broker rejected message",
+			expectCalls:    map[string]int{"ProduceSync": 1},
+		},
+		{
+			name: "QoS boundary values",
+			msg: &wrp.Message{
+				Type:             wrp.SimpleEventMessageType,
+				Source:           "mac:112233445566",
+				Destination:      "event:test",
+				QualityOfService: 24, // boundary between low and medium
+			},
+			dynamicConfig: DynamicConfig{
+				TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+			},
+			mockSetup: func(m *mockKafkaClient) {
+				m.On("TryProduce", mock.Anything, mock.Anything, mock.Anything).Return()
+			},
+			expectedResult: Attempted,
+			expectedError:  "",
+			expectCalls:    map[string]int{"TryProduce": 1},
+		},
+		{
+			name: "QoS boundary values - 25",
+			msg: &wrp.Message{
+				Type:             wrp.SimpleEventMessageType,
+				Source:           "mac:112233445566",
+				Destination:      "event:test",
+				QualityOfService: 25, // boundary between low and medium
+			},
+			dynamicConfig: DynamicConfig{
+				TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+			},
+			mockSetup: func(m *mockKafkaClient) {
+				m.On("Produce", mock.Anything, mock.Anything, mock.Anything).Return()
+			},
+			expectedResult: Queued,
+			expectedError:  "",
+			expectCalls:    map[string]int{"Produce": 1},
+		},
+		{
+			name: "no topic match",
+			msg: &wrp.Message{
+				Type:             wrp.SimpleEventMessageType,
+				Source:           "mac:112233445566",
+				Destination:      "event:nomatch",
+				QualityOfService: 50,
+			},
+			dynamicConfig: DynamicConfig{
+				TopicMap: []TopicRoute{{Pattern: "different", Topic: "topic1"}},
+			},
+			mockSetup: func(m *mockKafkaClient) {
+				// No calls expected
+			},
+			expectedResult: Failed,
+			expectedError:  "no topic route matched",
+			expectCalls:    map[string]int{},
+		},
+		{
+			name: "invalid device ID",
+			msg: &wrp.Message{
+				Type:             wrp.SimpleEventMessageType,
+				Source:           "invalid-device-id",
+				Destination:      "event:test",
+				QualityOfService: 50,
+			},
+			dynamicConfig: DynamicConfig{
+				TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+			},
+			mockSetup: func(m *mockKafkaClient) {
+				// No calls expected
+			},
+			expectedResult: Failed,
+			expectedError:  "invalid device ID",
+			expectCalls:    map[string]int{},
+		},
+		{
+			name: "invalid destination",
+			msg: &wrp.Message{
+				Type:             wrp.SimpleEventMessageType,
+				Source:           "mac:112233445566",
+				Destination:      "invalid-destination",
+				QualityOfService: 50,
+			},
+			dynamicConfig: DynamicConfig{
+				TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+			},
+			mockSetup: func(m *mockKafkaClient) {
+				// No calls expected
+			},
+			expectedResult: Failed,
+			expectedError:  "invalid locator",
+			expectCalls:    map[string]int{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Setup
+			mockClient := &mockKafkaClient{}
+			tt.mockSetup(mockClient)
+
+			p := newTestPublisher(tt.dynamicConfig)
+			p.clientMu.Lock()
+			p.client = mockClient
+			p.clientMu.Unlock()
+
+			// Execute
+			result, err := p.Produce(context.Background(), tt.msg)
+
+			// Assert
+			assert.Equal(t, tt.expectedResult, result)
+			if tt.expectedError != "" {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedError)
+			} else {
+				assert.NoError(t, err)
+			}
+
+			// Verify method calls
+			for method, expectedCount := range tt.expectCalls {
+				mockClient.AssertNumberOfCalls(t, method, expectedCount)
+			}
+
+			mockClient.AssertExpectations(t)
+		})
+	}
+}
+
+// TestProduceContextCancellation tests context cancellation behavior
+func TestProduceContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	p := newTestPublisher(DynamicConfig{
+		TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+	})
+
+	msg := &wrp.Message{
+		Type:             wrp.SimpleEventMessageType,
+		Source:           "mac:112233445566",
+		Destination:      "event:test",
+		QualityOfService: 50,
+	}
+
+	result, err := p.Produce(ctx, msg)
+
+	assert.Equal(t, Failed, result)
+	assert.Error(t, err)
+	assert.Equal(t, context.Canceled, err)
+
+	// Cleanup
+	_ = cancel // satisfy linter
+}
+
+// TestProduceNotStarted tests behavior when client is not started
+func TestProduceNotStarted(t *testing.T) {
+	t.Parallel()
+
+	p := newTestPublisher(DynamicConfig{
+		TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+	})
+	// Don't set client - simulates not started
+
+	msg := &wrp.Message{
+		Type:             wrp.SimpleEventMessageType,
+		Source:           "mac:112233445566",
+		Destination:      "event:test",
+		QualityOfService: 50,
+	}
+
+	result, err := p.Produce(context.Background(), msg)
+
+	assert.Equal(t, Failed, result)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrNotStarted)
 }
