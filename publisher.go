@@ -297,66 +297,77 @@ func (p *Publisher) Produce(ctx context.Context, msg *wrp.Message) (Outcome, err
 		return Failed, ErrNotStarted
 	}
 
-	// Build the Kafka record
-	record, shardStrategy, err := p.buildRecord(msg)
-	event.TopicShardStrategy = string(shardStrategy)
+	// Build the Kafka records
+	records, shardStrategies, err := p.buildRecords(msg)
 	if err != nil {
 		p.dispatchEvent(&event, startTime, err)
 		return Failed, err
 	}
 
-	event.Topic = record.Topic
+	// If no records were created, return error
+	if len(records) == 0 {
+		err := errors.New("no records created")
+		p.dispatchEvent(&event, startTime, err)
+		return Failed, err
+	}
+
 	qos := msg.QualityOfService
 
-	// QoS routing
-	if qos <= 24 {
-		// Low QoS: Fire-and-forget with TryProduce
-		client.TryProduce(ctx, record, func(r *kgo.Record, err error) {
-			p.dispatchEvent(&event, startTime, err)
-		})
+	var returnOutcome Outcome
 
-		// Don't dispatchEvent() here - it's done in the callback.
-
-		return Attempted, nil
-
-	} else if qos <= 74 {
-		// Medium QoS: Async with retry, block if buffer full
-		// Provide callback to capture async errors (retries exhausted, timeout, etc.)
-		client.Produce(ctx, record, func(r *kgo.Record, err error) {
-			if err != nil {
-				// Async error occurred - dispatch error event
-				// Note: This runs in a different goroutine after the produce attempt
-				asyncEvent := PublishEvent{
-					EventType:          event.EventType,
-					Topic:              event.Topic,
-					TopicShardStrategy: event.TopicShardStrategy,
-					Error:              err,
-					ErrorType:          errorType(err),
-					Duration:           time.Since(startTime),
-				}
-				p.dispatchEvent(&asyncEvent, startTime, err)
-			}
-		})
-
-		// Optimistically dispatch success event (actual result delivered via callback)
-		p.dispatchEvent(&event, startTime, nil)
-		return Queued, nil
-
-	} else {
-		// High QoS: Sync with confirmation
-		results := client.ProduceSync(ctx, record)
-
-		if len(results) > 0 && results[0].Err != nil {
-			// Broker error
-			err := fmt.Errorf("broker rejected message: %w", results[0].Err)
-			p.dispatchEvent(&event, startTime, err)
-			return Failed, err
+	for i, record := range records {
+		recordEvent := PublishEvent{
+			EventType: eventType(msg),
 		}
+		recordEvent.Topic = record.Topic
+		recordEvent.TopicShardStrategy = string(shardStrategies[i])
 
-		// Success
-		p.dispatchEvent(&event, startTime, nil)
-		return Accepted, nil
+		if qos <= 24 {
+			// Low QoS: Fire-and-forget with TryProduce
+			client.TryProduce(ctx, record, func(r *kgo.Record, err error) {
+				p.dispatchEvent(&recordEvent, startTime, err)
+			})
+			returnOutcome = Attempted
+		} else if qos <= 74 {
+			// Medium QoS: Async with retry, block if buffer full
+			// Provide callback to capture async errors (retries exhausted, timeout, etc.)
+			client.Produce(ctx, record, func(r *kgo.Record, err error) {
+				if err != nil {
+					// Async error occurred - dispatch error event
+					// Note: This runs in a different goroutine after the produce attempt
+					asyncEvent := PublishEvent{
+						EventType:          recordEvent.EventType,
+						Topic:              recordEvent.Topic,
+						TopicShardStrategy: recordEvent.TopicShardStrategy,
+						Error:              err,
+						ErrorType:          errorType(err),
+						Duration:           time.Since(startTime),
+					}
+					p.dispatchEvent(&asyncEvent, startTime, err)
+				}
+			})
+
+			// Optimistically dispatch success event (actual result delivered via callback)
+			p.dispatchEvent(&recordEvent, startTime, nil)
+			returnOutcome = Queued
+		} else {
+			// High QoS: Sync with confirmation
+			results := client.ProduceSync(ctx, record)
+
+			if len(results) > 0 && results[0].Err != nil {
+				// Broker error - for sync operations, we still return immediately on error
+				err := fmt.Errorf("broker rejected message: %w", results[0].Err)
+				p.dispatchEvent(&recordEvent, startTime, err)
+				return Failed, err
+			}
+
+			// Success
+			p.dispatchEvent(&recordEvent, startTime, nil)
+			returnOutcome = Accepted
+		}
 	}
+
+	return returnOutcome, nil
 }
 
 // eventType extracts the event type from a WRP message's Destination field.
@@ -373,20 +384,20 @@ func eventType(msg *wrp.Message) string {
 	return locator.Authority
 }
 
-// buildRecord builds a franz-go kgo.Record from a WRP message.
-// Returns the record, topic shard strategy used, and any error.
-func (p *Publisher) buildRecord(msg *wrp.Message) (*kgo.Record, TopicShardStrategy, error) {
+// buildRecord builds a list of franz-go kgo.Records from a WRP message.
+// Returns the records, topic shard strategies used, and any error.
+func (p *Publisher) buildRecords(msg *wrp.Message) ([]*kgo.Record, []TopicShardStrategy, error) {
 	dynCfg := p.dynamicConfig.Load()
 
-	topic, shardStrategy, err := dynCfg.match(msg)
+	topics, shardStrategies, err := dynCfg.matches(msg)
 	if err != nil {
-		return nil, shardStrategy, err
+		return nil, nil, err
 	}
 
 	// Encode message to msgpack format
 	encoded, err := msg.EncodeMsgpack(nil)
 	if err != nil {
-		return nil, shardStrategy,
+		return nil, nil,
 			errors.Join(
 				ErrEncoding,
 				fmt.Errorf("msgpack encoding failed"),
@@ -397,7 +408,7 @@ func (p *Publisher) buildRecord(msg *wrp.Message) (*kgo.Record, TopicShardStrate
 	// Use device ID (from WRP Source) as partition key for ordering
 	deviceID, err := wrp.ParseDeviceID(msg.Source)
 	if err != nil {
-		return nil, shardStrategy,
+		return nil, nil,
 			errors.Join(
 				ErrValidation,
 				fmt.Errorf("invalid device ID in WRP Source `%s`", msg.Source),
@@ -405,15 +416,19 @@ func (p *Publisher) buildRecord(msg *wrp.Message) (*kgo.Record, TopicShardStrate
 			)
 	}
 
-	// Create record
-	record := &kgo.Record{
-		Topic:   topic,
-		Key:     deviceID.Bytes(),
-		Value:   encoded,
-		Headers: dynCfg.headers(msg),
+	// Create records for each topic
+	records := make([]*kgo.Record, 0, len(topics))
+	for _, topic := range topics {
+		record := &kgo.Record{
+			Topic:   topic,
+			Key:     deviceID.Bytes(),
+			Value:   encoded,
+			Headers: dynCfg.headers(msg),
+		}
+		records = append(records, record)
 	}
 
-	return record, shardStrategy, nil
+	return records, shardStrategies, nil
 }
 
 // dispatchEvent dispatches a PublishEvent to all registered listeners.
