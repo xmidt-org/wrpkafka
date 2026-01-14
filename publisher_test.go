@@ -487,8 +487,8 @@ func TestProduceNotStarted(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNotStarted)
 }
 
-// TestProduceTableDriven provides table-driven tests for the Produce function
-func TestProduceTableDriven(t *testing.T) {
+// TestProduce provides table-driven tests for the Produce function
+func TestProduce(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
