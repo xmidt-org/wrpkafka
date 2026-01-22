@@ -15,7 +15,7 @@ import (
 type TopicRoute struct {
 	// Pattern is the glob pattern to match event types (case-sensitive by default).
 	// Supports: exact match, "*" (catch-all), "prefix-*", "foo\*" (escaped).
-	Pattern Pattern
+	Patterns Patterns
 
 	// CaseInsensitive enables case-insensitive pattern matching.
 	CaseInsensitive bool
@@ -36,9 +36,9 @@ type TopicRoute struct {
 	// Automatically initialized for all multi-topic routes during validation.
 	counter *atomic.Uint64
 
-	// matcher is for internal use only - do not set manually.
-	// Compiled pattern matcher initialized during configuration validation.
-	matcher *patternMatcher
+	// matchers is for internal use only - do not set manually.
+	// Compiled pattern matchers initialized during configuration validation.
+	matchers []patternMatcher
 }
 
 func (route *TopicRoute) compile() error {
@@ -46,15 +46,17 @@ func (route *TopicRoute) compile() error {
 		return err
 	}
 
-	m, _ := route.Pattern.compile(route.CaseInsensitive)
+	for _, pattern := range route.Patterns.Patterns {
+		m, _ := pattern.compile(route.CaseInsensitive)
+		route.matchers = append(route.matchers, *m)
+	}
 
-	route.matcher = m
 	return nil
 }
 
 // validate validates a single TopicRoute.
 func (route *TopicRoute) validate() error {
-	if err := route.Pattern.validate(); err != nil {
+	if err := route.Patterns.validate(); err != nil {
 		return err
 	}
 
