@@ -37,6 +37,11 @@ import (
 // for performance and clarity.
 type Pattern string
 
+type Patterns struct {
+	Patterns    []Pattern
+	RegexFields []string
+}
+
 // compile parses and optimizes the pattern for efficient repeated matching.
 // This method performs all pattern analysis once, returning a matcher that
 // can quickly match event types without re-parsing.
@@ -134,6 +139,19 @@ func (p Pattern) validate() error {
 		return errors.Join(ErrValidation, fmt.Errorf("pattern '%s' is invalid: at most one unescaped '*' is allowed", pattern))
 	}
 
+	return nil
+}
+
+func (ps Patterns) validate() error {
+	if len(ps.Patterns) == 0 {
+		return errors.Join(ErrValidation, fmt.Errorf("patterns must not be empty"))
+	}
+
+	for i, p := range ps.Patterns {
+		if err := p.validate(); err != nil {
+			return fmt.Errorf("pattern %d: %w", i, err)
+		}
+	}
 	return nil
 }
 

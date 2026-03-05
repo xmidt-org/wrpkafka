@@ -37,30 +37,27 @@ type DynamicConfig struct {
 	Acks Acks
 }
 
+// match finds the first matching topic for the given WRP message.
+// Returns the topic name, sharding strategy, or an error if no match found.
 func (dc *DynamicConfig) match(msg *wrp.Message) (string, TopicShardStrategy, error) {
-	locator, err := wrp.ParseLocator(msg.Destination)
-	if err != nil {
-		return "", TopicShardNone, errors.Join(ErrValidation, err)
-	}
 
 	for _, route := range dc.TopicMap {
-		if !route.matcher.matches(locator.Authority) {
-			continue
-		}
+		if dc.routeMatches(msg, &route) {
+			// Match found
+			topic := route.selectTopic(msg)
+			if topic == "" {
+				return "", route.TopicShardStrategy,
+					errors.New("no topic selected for message")
+			}
 
-		topic := route.selectTopic(msg)
-		if topic == "" {
-			return "", route.TopicShardStrategy,
-				errors.New("no topic selected for message")
+			// Success - return first match
+			return topic, route.TopicShardStrategy, nil
 		}
-
-		// Success
-		return topic, route.TopicShardStrategy, nil
 	}
 
 	return "", TopicShardNone, errors.Join(
 		ErrNoTopicMatch,
-		fmt.Errorf("no topic route matched for event type '%s'", locator.Authority),
+		fmt.Errorf("no topic route matched for message"),
 	)
 }
 
@@ -68,34 +65,82 @@ func (dc *DynamicConfig) matches(msg *wrp.Message) ([]string, []TopicShardStrate
 	var topics []string
 	var shardStrategy []TopicShardStrategy
 
-	locator, err := wrp.ParseLocator(msg.Destination)
-	if err != nil {
-		return nil, nil, errors.Join(ErrValidation, err)
-	}
-
 	for _, route := range dc.TopicMap {
-		if !route.matcher.matches(locator.Authority) {
-			continue
-		}
+		if dc.routeMatches(msg, &route) {
+			// Match found
+			topic := route.selectTopic(msg)
+			if topic == "" {
+				return nil, nil, errors.New("no topic selected for message")
+			}
 
-		topic := route.selectTopic(msg)
-		if topic == "" {
-			return nil, nil, errors.New("no topic selected for message")
+			// Success
+			topics = append(topics, topic)
+			shardStrategy = append(shardStrategy, route.TopicShardStrategy)
 		}
-
-		// Success
-		topics = append(topics, topic)
-		shardStrategy = append(shardStrategy, route.TopicShardStrategy)
 	}
 
 	if len(topics) == 0 {
 		return nil, nil, errors.Join(
 			ErrNoTopicMatch,
-			fmt.Errorf("no topic route matched for event type '%s'", locator.Authority),
+			fmt.Errorf("no topic route matched for message"),
 		)
 	}
 
 	return topics, shardStrategy, nil
+}
+
+// routeMatches checks if a TopicRoute matches the given WRP message.
+// Uses the route's patterns matching
+// All RegexFields must match for the route to match.
+func (dc *DynamicConfig) routeMatches(msg *wrp.Message, route *TopicRoute) bool {
+
+	// Check all RegexFields - all must match for the route to match
+	for _, fieldName := range route.Patterns.RegexFields {
+		fieldValue := dc.extractFieldValue(msg, fieldName)
+		if fieldValue == "" {
+			return false // Field not found or empty
+		}
+
+		// Check if any pattern matches this field value
+		fieldMatches := false
+		for _, matcher := range route.matchers {
+			if matcher.matches(fieldValue) {
+				fieldMatches = true
+				break
+			}
+		}
+
+		if !fieldMatches {
+			return false // This required field didn't match any pattern
+		}
+	}
+
+	return true // All required fields matched
+}
+
+// extractFieldValue extracts a field value from a WRP message based on field name.
+// Returns empty string if field not found or parsing fails.
+func (dc *DynamicConfig) extractFieldValue(msg *wrp.Message, fieldName string) string {
+	switch fieldName {
+	case "destination.authority":
+		if locator, err := wrp.ParseLocator(msg.Destination); err == nil {
+			return locator.Authority
+		}
+	case "source.authority":
+		if locator, err := wrp.ParseLocator(msg.Source); err == nil {
+			return locator.Authority
+		}
+	case "destination": // Shorthand for destination.authority
+		if locator, err := wrp.ParseLocator(msg.Destination); err == nil {
+			return locator.Authority
+		}
+	case "source": // Shorthand for source.authority
+		if locator, err := wrp.ParseLocator(msg.Source); err == nil {
+			return locator.Authority
+		}
+	}
+
+	return ""
 }
 
 // headers builds the Kafka record headers from the DynamicConfig and WRP message.
