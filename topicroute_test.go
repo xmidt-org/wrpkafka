@@ -195,7 +195,10 @@ func TestSelectByDeviceID(t *testing.T) {
 				counter: &atomic.Uint64{},
 			}
 
-			msg := &wrp.Message{Source: tt.deviceID}
+			msg := &wrp.Message{}
+			if tt.deviceID != "" {
+				msg.Metadata = map[string]string{MetadataKeyDeviceID: tt.deviceID}
+			}
 			got := route.selectByDeviceID(msg)
 
 			assert.Equal(t, tt.want, got)
@@ -284,7 +287,7 @@ func TestSelectTopic(t *testing.T) {
 		route  TopicRoute
 		msg    *wrp.Message
 		want   string
-		verify func(t *testing.T, route *TopicRoute, got string)
+		verify func(t *testing.T, route *TopicRoute, got Topic)
 	}{
 		{
 			name: "single topic route",
@@ -312,10 +315,10 @@ func TestSelectTopic(t *testing.T) {
 				counter:            &atomic.Uint64{},
 			},
 			msg: &wrp.Message{Source: "mac:112233445566"},
-			verify: func(t *testing.T, route *TopicRoute, got string) {
-				assert.NotEmpty(t, got)
+			verify: func(t *testing.T, route *TopicRoute, got Topic) {
+				assert.NotEmpty(t, got.Name)
 				// Verify it's one of the configured topics
-				assert.Contains(t, route.Topics, got)
+				assert.Contains(t, route.Topics, got.Name)
 			},
 		},
 		{
@@ -329,9 +332,9 @@ func TestSelectTopic(t *testing.T) {
 				Source:   "mac:112233445566",
 				Metadata: map[string]string{"region": "us-west"},
 			},
-			verify: func(t *testing.T, route *TopicRoute, got string) {
-				assert.NotEmpty(t, got)
-				assert.Contains(t, route.Topics, got)
+			verify: func(t *testing.T, route *TopicRoute, got Topic) {
+				assert.NotEmpty(t, got.Name)
+				assert.Contains(t, route.Topics, got.Name)
 			},
 		},
 		{
@@ -354,7 +357,7 @@ func TestSelectTopic(t *testing.T) {
 			if tt.verify != nil {
 				tt.verify(t, &tt.route, got)
 			} else {
-				assert.Equal(t, tt.want, got)
+				assert.Equal(t, tt.want, got.Name)
 			}
 		})
 	}

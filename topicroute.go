@@ -31,6 +31,9 @@ type TopicRoute struct {
 	// Empty string for single-topic routes (Topic field used).
 	TopicShardStrategy TopicShardStrategy
 
+	// HashKeyType specifies how to extract the hash key from the WRP message for sharding.
+	HashKeyType HashKeyType
+
 	// counter is for internal use only - do not set manually.
 	// Tracks messages flowing through this route for round-robin distribution.
 	// Automatically initialized for all multi-topic routes during validation.
@@ -39,6 +42,11 @@ type TopicRoute struct {
 	// matcher is for internal use only - do not set manually.
 	// Compiled pattern matcher initialized during configuration validation.
 	matcher *patternMatcher
+}
+
+type Topic struct {
+	Name string
+	Key  HashKeyType
 }
 
 func (route *TopicRoute) compile() error {
@@ -101,28 +109,28 @@ func (route *TopicRoute) validate() error {
 
 // selectTopic selects the appropriate Kafka topic for a message based on the routing rule.
 // Supports single-topic routes and multi-topic sharding strategies.
-func (r *TopicRoute) selectTopic(msg *wrp.Message) string {
+func (r *TopicRoute) selectTopic(msg *wrp.Message) Topic {
 	// Single topic route (TopicShardNone)
 	if r.Topic != "" {
-		return r.Topic
+		return Topic{Name: r.Topic, Key: r.HashKeyType}
 	}
 
 	// Multi-topic sharding - delegate to strategy-specific methods
 	switch r.TopicShardStrategy {
 	case TopicShardRoundRobin:
-		return r.selectRoundRobin()
+		return Topic{Name: r.selectRoundRobin(), Key: r.HashKeyType}
 
 	case TopicShardDeviceID:
-		return r.selectByDeviceID(msg)
+		return Topic{Name: r.selectByDeviceID(msg), Key: r.HashKeyType}
 
 	default:
 		// Check if it's a metadata strategy
 		if isMetadata, fieldName := r.TopicShardStrategy.IsMetadataStrategy(); isMetadata {
-			return r.selectByMetadata(msg, fieldName)
+			return Topic{Name: r.selectByMetadata(msg, fieldName), Key: r.HashKeyType}
 		}
 	}
 
-	return ""
+	return Topic{}
 }
 
 // selectRoundRobin selects a topic using round-robin distribution.
@@ -141,7 +149,7 @@ func (r *TopicRoute) selectRoundRobin() string {
 	return r.Topics[idx]
 }
 
-// selectByDeviceID selects a topic by hashing the device ID from WRP Source field.
+// selectByDeviceID selects a topic by hashing the device ID from WRP device id metadata field.
 // Falls back to round-robin if the device ID is missing or empty.
 // Returns empty string if no topics are configured.
 func (r *TopicRoute) selectByDeviceID(msg *wrp.Message) string {
@@ -149,7 +157,7 @@ func (r *TopicRoute) selectByDeviceID(msg *wrp.Message) string {
 		return ""
 	}
 
-	deviceID := msg.Source
+	deviceID, _ := GetHashKey(msg, HashKeyDeviceID)
 	if deviceID == "" {
 		// Fall back to round-robin if device ID is missing
 		return r.selectRoundRobin()
