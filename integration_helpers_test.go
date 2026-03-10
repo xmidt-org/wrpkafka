@@ -202,6 +202,7 @@ func createTestMessage(eventType string, deviceID string, qos int64) *wrp.Messag
 	return &wrp.Message{
 		Type:             wrp.SimpleEventMessageType,
 		Source:           deviceID,
+		Metadata:         map[string]string{"hw-deviceid": deviceID},
 		Destination:      "event:" + eventType + "/" + deviceID,
 		Payload:          []byte(`{"status":"online"}`),
 		QualityOfService: wrp.QOSValue(qos),
