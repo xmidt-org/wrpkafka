@@ -34,6 +34,8 @@ type TopicRoute struct {
 	// HashKeyType specifies how to extract the hash key from the WRP message for sharding.
 	HashKeyType HashKeyType
 
+	MetadataKeyField string
+
 	// counter is for internal use only - do not set manually.
 	// Tracks messages flowing through this route for round-robin distribution.
 	// Automatically initialized for all multi-topic routes during validation.
@@ -45,8 +47,9 @@ type TopicRoute struct {
 }
 
 type Topic struct {
-	Name string
-	Key  HashKeyType
+	Name        string
+	KeyType     HashKeyType
+	MetadataKey string
 }
 
 func (route *TopicRoute) compile() error {
@@ -112,21 +115,21 @@ func (route *TopicRoute) validate() error {
 func (r *TopicRoute) selectTopic(msg *wrp.Message) Topic {
 	// Single topic route (TopicShardNone)
 	if r.Topic != "" {
-		return Topic{Name: r.Topic, Key: r.HashKeyType}
+		return Topic{Name: r.Topic, KeyType: r.HashKeyType, MetadataKey: r.MetadataKeyField}
 	}
 
 	// Multi-topic sharding - delegate to strategy-specific methods
 	switch r.TopicShardStrategy {
 	case TopicShardRoundRobin:
-		return Topic{Name: r.selectRoundRobin(), Key: r.HashKeyType}
+		return Topic{Name: r.selectRoundRobin(), KeyType: r.HashKeyType}
 
 	case TopicShardDeviceID:
-		return Topic{Name: r.selectByDeviceID(msg), Key: r.HashKeyType}
+		return Topic{Name: r.selectByDeviceID(msg), KeyType: r.HashKeyType}
 
 	default:
 		// Check if it's a metadata strategy
 		if isMetadata, fieldName := r.TopicShardStrategy.IsMetadataStrategy(); isMetadata {
-			return Topic{Name: r.selectByMetadata(msg, fieldName), Key: r.HashKeyType}
+			return Topic{Name: r.selectByMetadata(msg, fieldName), KeyType: r.HashKeyType, MetadataKey: r.MetadataKeyField}
 		}
 	}
 
@@ -157,7 +160,7 @@ func (r *TopicRoute) selectByDeviceID(msg *wrp.Message) string {
 		return ""
 	}
 
-	deviceID, _ := GetHashKey(msg, HashKeyDeviceID)
+	deviceID, _ := GetHashKey(msg, r.HashKeyType, r.MetadataKeyField)
 	if deviceID == "" {
 		// Fall back to round-robin if device ID is missing
 		return r.selectRoundRobin()

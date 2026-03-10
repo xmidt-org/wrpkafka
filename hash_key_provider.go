@@ -11,45 +11,49 @@ import (
 	"github.com/xmidt-org/wrp-go/v5"
 )
 
+var (
+	ErrInvalidHashKeyType      = errors.New("invalid hash key type")
+	ErrEmptyMetatadataKeyField = errors.New("metadata key field is empty")
+)
+
 const (
-	// MetadataKeyDeviceID is the metadata key for hardware device ID.
-	MetadataKeyDeviceID = "hw-deviceid"
+	DefaultMetadataKeyField = "hw-deviceid"
 )
 
 // HashKeyType represents the type of hash key to extract from a WRP message.
-type HashKeyType int
+type HashKeyType string
 
 const (
-	// HashKeyDeviceID is the default key.
-	HashKeyDeviceID HashKeyType = iota
+	// key from any field in metadata
+	HashKeyMetadata HashKeyType = "metadata"
 
-	// HashKeyNone indicates no hash key should be used (e.g., for non-sharded topics).
-	HashKeyNone
+	// deviceId parsed from the source field
+	HashKeySource HashKeyType = "source"
+
+	// indicates no hash key should be used (e.g., for non-sharded topics).
+	HashKeyNone HashKeyType = "none"
 )
-
-// String returns the string representation of the HashKeyType.
-func (h HashKeyType) String() (string, error) {
-	switch h {
-	case HashKeyNone:
-		return "none", nil
-	case HashKeyDeviceID:
-		return "deviceid", nil
-	default:
-		return fmt.Sprintf("unknown(%d)", h), fmt.Errorf("unknown hash key type: %d", h)
-	}
-}
 
 // ParseHashKeyType converts a string to a HashKeyType.
 // The comparison is case-insensitive.
-// Defaults to deviceId
-func ParseHashKeyType(s string) HashKeyType {
-	switch strings.ToLower(s) {
-	case "none":
-		return HashKeyNone
-	case "deviceid":
-		return HashKeyDeviceID
+// Defaults to metadata/hw-deviceid
+func ParseHashKeyType(s string) (HashKeyType, string, error) {
+	if s == "" {
+		return HashKeyMetadata, DefaultMetadataKeyField, nil
+	}
+	tokens := strings.Split(s, "/")
+	switch strings.ToLower(tokens[0]) {
+	case string(HashKeyNone):
+		return HashKeyNone, "", nil
+	case string(HashKeyMetadata):
+		if (len(tokens) >= 2) && tokens[1] != "" {
+			return HashKeyMetadata, tokens[1], nil
+		}
+		return HashKeyMetadata, DefaultMetadataKeyField, nil
+	case string(HashKeySource):
+		return HashKeySource, "", nil
 	default:
-		return HashKeyDeviceID
+		return HashKeyMetadata, DefaultMetadataKeyField, ErrInvalidHashKeyType
 	}
 }
 
@@ -59,27 +63,37 @@ var (
 )
 
 // GetHashKey extracts the hash key from a WRP message based on the specified hash key type.
-// Returns the hash key string or an error if the hash key is required but empty.
-//
-// Behavior by hash key type:
-//   - HashKeyNone: Returns empty string and nil error.
-//   - HashKeyDeviceID: Returns the value from msg.Metadata["hw-deviceid"] or ErrEmptyHashKey if empty.
-func GetHashKey(msg *wrp.Message, keyType HashKeyType) (string, error) {
+// Returns the hash key string or an error if the hash key is required but empty.  Defaults
+// to metadata with the default field if keyType is empty.
+func GetHashKey(msg *wrp.Message, keyType HashKeyType, metadataKey string) (string, error) {
+	if keyType == "" {
+		keyType = HashKeyMetadata
+		metadataKey = DefaultMetadataKeyField
+	}
+
 	switch keyType {
 	case HashKeyNone:
 		return "", nil
-
-	case HashKeyDeviceID:
+	case HashKeyMetadata:
 		if msg.Metadata == nil {
 			return "", ErrEmptyHashKey
 		}
-		hashKey := msg.Metadata[MetadataKeyDeviceID]
+		hashKey := msg.Metadata[metadataKey]
 		if hashKey == "" {
 			return "", ErrEmptyHashKey
 		}
 		return hashKey, nil
+	case HashKeySource:
+		if msg.Source == "" {
+			return "", ErrEmptyHashKey
+		}
+		deviceID, err := wrp.ParseDeviceID(msg.Source)
+		if err != nil {
+			return "", fmt.Errorf("failed to parse device ID from source: %w", err)
+		}
+		return deviceID.ID(), nil
 
 	default:
-		return "", fmt.Errorf("unsupported hash key type: %v", keyType)
+		return "", fmt.Errorf("unsupported hash key type: %v: %w", keyType, ErrInvalidHashKeyType)
 	}
 }

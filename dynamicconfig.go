@@ -84,7 +84,7 @@ func (dc *DynamicConfig) matches(msg *wrp.Message) ([]Topic, []TopicShardStrateg
 		}
 
 		// Success
-		topics = append(topics, Topic{Name: topic.Name, Key: topic.Key})
+		topics = append(topics, topic)
 		shardStrategy = append(shardStrategy, route.TopicShardStrategy)
 	}
 

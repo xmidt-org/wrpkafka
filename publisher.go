@@ -408,7 +408,7 @@ func (p *Publisher) buildRecords(msg *wrp.Message) ([]*kgo.Record, []TopicShardS
 	// Create records for each topic
 	records := make([]*kgo.Record, 0, len(topics))
 	for _, topic := range topics {
-		partitionKey, err := GetHashKey(msg, topic.Key)
+		partitionKey, err := GetHashKey(msg, topic.KeyType, topic.MetadataKey)
 		if err != nil {
 			return nil, nil,
 				errors.Join(
