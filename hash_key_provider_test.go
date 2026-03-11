@@ -83,8 +83,8 @@ func (s *HashKeyProviderSuite) TestParseHashKeyType_Invalid() {
 	keyType, field, err := ParseHashKeyType("invalid")
 	assert.Error(s.T(), err)
 	assert.True(s.T(), errors.Is(err, ErrInvalidHashKeyType))
-	assert.Equal(s.T(), HashKeyMetadata, keyType)
-	assert.Equal(s.T(), DefaultMetadataKeyField, field)
+	assert.Equal(s.T(), HashKeyType(""), keyType)
+	assert.Equal(s.T(), "", field)
 }
 
 func (s *HashKeyProviderSuite) TestGetHashKey_None() {
