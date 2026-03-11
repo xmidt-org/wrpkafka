@@ -23,10 +23,9 @@ func TestTopicRoute_Validate(t *testing.T) {
 		{
 			name: "valid single topic",
 			route: TopicRoute{
-				Pattern:          "event.type",
-				Topic:            "my-topic",
-				HashKeyType:      HashKeyMetadata,
-				MetadataKeyField: DefaultMetadataKeyField,
+				Pattern: "event.type",
+				Topic:   "my-topic",
+				HashKey: HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			wantErr: false,
 		},
@@ -36,29 +35,26 @@ func TestTopicRoute_Validate(t *testing.T) {
 				Pattern:            "event.*",
 				Topics:             []string{"topic-1", "topic-2"},
 				TopicShardStrategy: TopicShardRoundRobin,
-				HashKeyType:        HashKeyMetadata,
-				MetadataKeyField:   DefaultMetadataKeyField,
+				HashKey:            HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			wantErr: false,
 		},
 		{
 			name: "invalid empty pattern",
 			route: TopicRoute{
-				Pattern:          "",
-				Topic:            "my-topic",
-				HashKeyType:      HashKeyMetadata,
-				MetadataKeyField: DefaultMetadataKeyField,
+				Pattern: "",
+				Topic:   "my-topic",
+				HashKey: HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid both topic and topics set",
 			route: TopicRoute{
-				Pattern:          "event.type",
-				Topic:            "my-topic",
-				Topics:           []string{"topic-1", "topic-2"},
-				HashKeyType:      HashKeyMetadata,
-				MetadataKeyField: DefaultMetadataKeyField,
+				Pattern: "event.type",
+				Topic:   "my-topic",
+				Topics:  []string{"topic-1", "topic-2"},
+				HashKey: HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			wantErr: true,
 		},
@@ -68,27 +64,24 @@ func TestTopicRoute_Validate(t *testing.T) {
 				Pattern:            "event.type",
 				Topic:              "my-topic",
 				TopicShardStrategy: TopicShardRoundRobin,
-				HashKeyType:        HashKeyMetadata,
-				MetadataKeyField:   DefaultMetadataKeyField,
+				HashKey:            HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid multi-topic missing shard strategy",
 			route: TopicRoute{
-				Pattern:          "event.*",
-				Topics:           []string{"topic-1", "topic-2"},
-				HashKeyType:      HashKeyMetadata,
-				MetadataKeyField: DefaultMetadataKeyField,
+				Pattern: "event.*",
+				Topics:  []string{"topic-1", "topic-2"},
+				HashKey: HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid no topics or topic",
 			route: TopicRoute{
-				Pattern:          "event.type",
-				HashKeyType:      HashKeyMetadata,
-				MetadataKeyField: DefaultMetadataKeyField,
+				Pattern: "event.type",
+				HashKey: HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			wantErr: true,
 		},
@@ -98,8 +91,7 @@ func TestTopicRoute_Validate(t *testing.T) {
 				Pattern:            "event.*",
 				Topics:             []string{"topic-1", "topic-2"},
 				TopicShardStrategy: "unknownstrategy",
-				HashKeyType:        HashKeyMetadata,
-				MetadataKeyField:   DefaultMetadataKeyField,
+				HashKey:            HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			wantErr: true,
 		},
@@ -154,10 +146,9 @@ func TestSelectRoundRobin(t *testing.T) {
 			t.Parallel()
 
 			route := &TopicRoute{
-				Topics:           tt.topics,
-				counter:          &atomic.Uint64{},
-				HashKeyType:      HashKeyMetadata,
-				MetadataKeyField: DefaultMetadataKeyField,
+				Topics:  tt.topics,
+				counter: &atomic.Uint64{},
+				HashKey: HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			}
 
 			for i := 0; i < tt.calls; i++ {
@@ -209,10 +200,9 @@ func TestSelectByDeviceID(t *testing.T) {
 			t.Parallel()
 
 			route := &TopicRoute{
-				Topics:           tt.topics,
-				counter:          &atomic.Uint64{},
-				HashKeyType:      HashKeyMetadata,
-				MetadataKeyField: DefaultMetadataKeyField,
+				Topics:  tt.topics,
+				counter: &atomic.Uint64{},
+				HashKey: HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			}
 
 			msg := &wrp.Message{}
@@ -286,10 +276,9 @@ func TestSelectByMetadata(t *testing.T) {
 			t.Parallel()
 
 			route := &TopicRoute{
-				Topics:           tt.topics,
-				counter:          &atomic.Uint64{},
-				HashKeyType:      HashKeyMetadata,
-				MetadataKeyField: DefaultMetadataKeyField,
+				Topics:  tt.topics,
+				counter: &atomic.Uint64{},
+				HashKey: HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			}
 
 			msg := &wrp.Message{Metadata: tt.metadata}
@@ -314,9 +303,8 @@ func TestSelectTopic(t *testing.T) {
 		{
 			name: "single topic route",
 			route: TopicRoute{
-				Topic:            "my-topic",
-				HashKeyType:      HashKeyMetadata,
-				MetadataKeyField: DefaultMetadataKeyField,
+				Topic:   "my-topic",
+				HashKey: HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			msg:  &wrp.Message{Source: "mac:112233445566"},
 			want: "my-topic",
@@ -327,8 +315,7 @@ func TestSelectTopic(t *testing.T) {
 				Topics:             []string{"topic-0", "topic-1"},
 				TopicShardStrategy: TopicShardRoundRobin,
 				counter:            &atomic.Uint64{},
-				HashKeyType:        HashKeyMetadata,
-				MetadataKeyField:   DefaultMetadataKeyField,
+				HashKey:            HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			msg:  &wrp.Message{Source: "mac:112233445566"},
 			want: "topic-0",
@@ -339,8 +326,7 @@ func TestSelectTopic(t *testing.T) {
 				Topics:             []string{"topic-0", "topic-1", "topic-2"},
 				TopicShardStrategy: TopicShardDeviceID,
 				counter:            &atomic.Uint64{},
-				HashKeyType:        HashKeyMetadata,
-				MetadataKeyField:   DefaultMetadataKeyField,
+				HashKey:            HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			msg: &wrp.Message{Source: "mac:112233445566"},
 			verify: func(t *testing.T, route *TopicRoute, got Topic) {
@@ -355,8 +341,7 @@ func TestSelectTopic(t *testing.T) {
 				Topics:             []string{"topic-0", "topic-1"},
 				TopicShardStrategy: "metadata:region",
 				counter:            &atomic.Uint64{},
-				HashKeyType:        HashKeyMetadata,
-				MetadataKeyField:   DefaultMetadataKeyField,
+				HashKey:            HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			msg: &wrp.Message{
 				Source:   "mac:112233445566",
@@ -373,8 +358,7 @@ func TestSelectTopic(t *testing.T) {
 				Topics:             []string{"topic-0", "topic-1"},
 				TopicShardStrategy: "unknown-strategy",
 				counter:            &atomic.Uint64{},
-				HashKeyType:        HashKeyMetadata,
-				MetadataKeyField:   DefaultMetadataKeyField,
+				HashKey:            HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			msg:  &wrp.Message{Source: "mac:112233445566"},
 			want: "",
@@ -400,10 +384,9 @@ func TestSelectRoundRobin_Concurrency(t *testing.T) {
 	t.Parallel()
 
 	route := &TopicRoute{
-		Topics:           []string{"topic-0", "topic-1", "topic-2"},
-		counter:          &atomic.Uint64{},
-		HashKeyType:      HashKeyMetadata,
-		MetadataKeyField: DefaultMetadataKeyField,
+		Topics:  []string{"topic-0", "topic-1", "topic-2"},
+		counter: &atomic.Uint64{},
+		HashKey: HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 	}
 
 	const goroutines = 10

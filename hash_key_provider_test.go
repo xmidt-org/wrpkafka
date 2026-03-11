@@ -16,82 +16,84 @@ type HashKeyProviderSuite struct {
 	suite.Suite
 }
 
-func (s *HashKeyProviderSuite) TestParseHashKeyType_Empty() {
-	keyType, field, err := ParseHashKeyType("")
+// ParseHashKey tests
+func (s *HashKeyProviderSuite) TestParseHashKey_Empty() {
+	hashKey, err := ParseHashKey("")
 	assert.NoError(s.T(), err)
-	assert.Equal(s.T(), HashKeyMetadata, keyType)
-	assert.Equal(s.T(), DefaultMetadataKeyField, field)
+	assert.Equal(s.T(), HashKeyMetadata, hashKey.Name)
+	assert.Equal(s.T(), DefaultMetadataKeyField, hashKey.MetadataField)
 }
 
-func (s *HashKeyProviderSuite) TestParseHashKeyType_None() {
-	keyType, field, err := ParseHashKeyType("none")
+func (s *HashKeyProviderSuite) TestParseHashKey_None() {
+	hashKey, err := ParseHashKey("none")
 	assert.NoError(s.T(), err)
-	assert.Equal(s.T(), HashKeyNone, keyType)
-	assert.Equal(s.T(), "", field)
+	assert.Equal(s.T(), HashKeyNone, hashKey.Name)
+	assert.Equal(s.T(), "", hashKey.MetadataField)
 }
 
-func (s *HashKeyProviderSuite) TestParseHashKeyType_None_CaseInsensitive() {
-	keyType, field, err := ParseHashKeyType("NONE")
+func (s *HashKeyProviderSuite) TestParseHashKey_None_CaseInsensitive() {
+	hashKey, err := ParseHashKey("NONE")
 	assert.NoError(s.T(), err)
-	assert.Equal(s.T(), HashKeyNone, keyType)
-	assert.Equal(s.T(), "", field)
+	assert.Equal(s.T(), HashKeyNone, hashKey.Name)
+	assert.Equal(s.T(), "", hashKey.MetadataField)
 }
 
-func (s *HashKeyProviderSuite) TestParseHashKeyType_Metadata_Default() {
-	keyType, field, err := ParseHashKeyType("metadata")
+func (s *HashKeyProviderSuite) TestParseHashKey_Metadata_Default() {
+	hashKey, err := ParseHashKey("metadata")
 	assert.NoError(s.T(), err)
-	assert.Equal(s.T(), HashKeyMetadata, keyType)
-	assert.Equal(s.T(), DefaultMetadataKeyField, field)
+	assert.Equal(s.T(), HashKeyMetadata, hashKey.Name)
+	assert.Equal(s.T(), DefaultMetadataKeyField, hashKey.MetadataField)
 }
 
-func (s *HashKeyProviderSuite) TestParseHashKeyType_Metadata_CustomField() {
-	keyType, field, err := ParseHashKeyType("metadata/custom-field")
+func (s *HashKeyProviderSuite) TestParseHashKey_Metadata_CustomField() {
+	hashKey, err := ParseHashKey("metadata/custom-field")
 	assert.NoError(s.T(), err)
-	assert.Equal(s.T(), HashKeyMetadata, keyType)
-	assert.Equal(s.T(), "custom-field", field)
+	assert.Equal(s.T(), HashKeyMetadata, hashKey.Name)
+	assert.Equal(s.T(), "custom-field", hashKey.MetadataField)
 }
 
-func (s *HashKeyProviderSuite) TestParseHashKeyType_Metadata_EmptyField() {
-	keyType, field, err := ParseHashKeyType("metadata/")
+func (s *HashKeyProviderSuite) TestParseHashKey_Metadata_EmptyField() {
+	hashKey, err := ParseHashKey("metadata/")
 	assert.NoError(s.T(), err)
-	assert.Equal(s.T(), HashKeyMetadata, keyType)
-	assert.Equal(s.T(), DefaultMetadataKeyField, field)
+	assert.Equal(s.T(), HashKeyMetadata, hashKey.Name)
+	assert.Equal(s.T(), DefaultMetadataKeyField, hashKey.MetadataField)
 }
 
-func (s *HashKeyProviderSuite) TestParseHashKeyType_Metadata_CaseInsensitive() {
-	keyType, field, err := ParseHashKeyType("METADATA/my-field")
+func (s *HashKeyProviderSuite) TestParseHashKey_Metadata_CaseInsensitive() {
+	hashKey, err := ParseHashKey("METADATA/my-field")
 	assert.NoError(s.T(), err)
-	assert.Equal(s.T(), HashKeyMetadata, keyType)
-	assert.Equal(s.T(), "my-field", field)
+	assert.Equal(s.T(), HashKeyMetadata, hashKey.Name)
+	assert.Equal(s.T(), "my-field", hashKey.MetadataField)
 }
 
-func (s *HashKeyProviderSuite) TestParseHashKeyType_Source() {
-	keyType, field, err := ParseHashKeyType("source")
+func (s *HashKeyProviderSuite) TestParseHashKey_Source() {
+	hashKey, err := ParseHashKey("source")
 	assert.NoError(s.T(), err)
-	assert.Equal(s.T(), HashKeySource, keyType)
-	assert.Equal(s.T(), "", field)
+	assert.Equal(s.T(), HashKeySource, hashKey.Name)
+	assert.Equal(s.T(), "", hashKey.MetadataField)
 }
 
-func (s *HashKeyProviderSuite) TestParseHashKeyType_Source_CaseInsensitive() {
-	keyType, field, err := ParseHashKeyType("SOURCE")
+func (s *HashKeyProviderSuite) TestParseHashKey_Source_CaseInsensitive() {
+	hashKey, err := ParseHashKey("SOURCE")
 	assert.NoError(s.T(), err)
-	assert.Equal(s.T(), HashKeySource, keyType)
-	assert.Equal(s.T(), "", field)
+	assert.Equal(s.T(), HashKeySource, hashKey.Name)
+	assert.Equal(s.T(), "", hashKey.MetadataField)
 }
 
-func (s *HashKeyProviderSuite) TestParseHashKeyType_Invalid() {
-	keyType, field, err := ParseHashKeyType("invalid")
+func (s *HashKeyProviderSuite) TestParseHashKey_Invalid() {
+	hashKey, err := ParseHashKey("invalid")
 	assert.Error(s.T(), err)
 	assert.True(s.T(), errors.Is(err, ErrInvalidHashKeyType))
-	assert.Equal(s.T(), HashKeyType(""), keyType)
-	assert.Equal(s.T(), "", field)
+	assert.Equal(s.T(), HashKey{}, hashKey)
 }
 
+// GetHashKey tests
 func (s *HashKeyProviderSuite) TestGetHashKey_None() {
 	msg := &wrp.Message{
 		Metadata: map[string]string{"hw-deviceid": "mac:112233445566"},
 	}
-	key, err := GetHashKey(msg, HashKeyNone, "")
+	hashKey := HashKey{Name: HashKeyNone}
+	key, err := hashKey.GetHashKey(msg)
 	assert.NoError(s.T(), err)
 	assert.Equal(s.T(), "", key)
 }
@@ -100,7 +102,8 @@ func (s *HashKeyProviderSuite) TestGetHashKey_Metadata_Valid() {
 	msg := &wrp.Message{
 		Metadata: map[string]string{"hw-deviceid": "mac:112233445566"},
 	}
-	key, err := GetHashKey(msg, HashKeyMetadata, "hw-deviceid")
+	hashKey := HashKey{Name: HashKeyMetadata, MetadataField: "hw-deviceid"}
+	key, err := hashKey.GetHashKey(msg)
 	assert.NoError(s.T(), err)
 	assert.Equal(s.T(), "mac:112233445566", key)
 }
@@ -109,16 +112,28 @@ func (s *HashKeyProviderSuite) TestGetHashKey_Metadata_CustomField() {
 	msg := &wrp.Message{
 		Metadata: map[string]string{"custom-id": "some-value"},
 	}
-	key, err := GetHashKey(msg, HashKeyMetadata, "custom-id")
+	hashKey := HashKey{Name: HashKeyMetadata, MetadataField: "custom-id"}
+	key, err := hashKey.GetHashKey(msg)
 	assert.NoError(s.T(), err)
 	assert.Equal(s.T(), "some-value", key)
+}
+
+func (s *HashKeyProviderSuite) TestGetHashKey_Metadata_DefaultWhenEmpty() {
+	msg := &wrp.Message{
+		Metadata: map[string]string{"hw-deviceid": "mac:112233445566"},
+	}
+	hashKey := HashKey{} // Empty struct should default to metadata/hw-deviceid
+	key, err := hashKey.GetHashKey(msg)
+	assert.NoError(s.T(), err)
+	assert.Equal(s.T(), "mac:112233445566", key)
 }
 
 func (s *HashKeyProviderSuite) TestGetHashKey_Metadata_NilMetadata() {
 	msg := &wrp.Message{
 		Metadata: nil,
 	}
-	key, err := GetHashKey(msg, HashKeyMetadata, "hw-deviceid")
+	hashKey := HashKey{Name: HashKeyMetadata, MetadataField: "hw-deviceid"}
+	key, err := hashKey.GetHashKey(msg)
 	assert.Error(s.T(), err)
 	assert.True(s.T(), errors.Is(err, ErrEmptyHashKey))
 	assert.Equal(s.T(), "", key)
@@ -128,7 +143,8 @@ func (s *HashKeyProviderSuite) TestGetHashKey_Metadata_EmptyValue() {
 	msg := &wrp.Message{
 		Metadata: map[string]string{"hw-deviceid": ""},
 	}
-	key, err := GetHashKey(msg, HashKeyMetadata, "hw-deviceid")
+	hashKey := HashKey{Name: HashKeyMetadata, MetadataField: "hw-deviceid"}
+	key, err := hashKey.GetHashKey(msg)
 	assert.Error(s.T(), err)
 	assert.True(s.T(), errors.Is(err, ErrEmptyHashKey))
 	assert.Equal(s.T(), "", key)
@@ -138,9 +154,21 @@ func (s *HashKeyProviderSuite) TestGetHashKey_Metadata_MissingField() {
 	msg := &wrp.Message{
 		Metadata: map[string]string{"other-field": "value"},
 	}
-	key, err := GetHashKey(msg, HashKeyMetadata, "hw-deviceid")
+	hashKey := HashKey{Name: HashKeyMetadata, MetadataField: "hw-deviceid"}
+	key, err := hashKey.GetHashKey(msg)
 	assert.Error(s.T(), err)
 	assert.True(s.T(), errors.Is(err, ErrEmptyHashKey))
+	assert.Equal(s.T(), "", key)
+}
+
+func (s *HashKeyProviderSuite) TestGetHashKey_Metadata_EmptyFieldName() {
+	msg := &wrp.Message{
+		Metadata: map[string]string{"hw-deviceid": "mac:112233445566"},
+	}
+	hashKey := HashKey{Name: HashKeyMetadata, MetadataField: ""}
+	key, err := hashKey.GetHashKey(msg)
+	assert.Error(s.T(), err)
+	assert.Contains(s.T(), err.Error(), "metadata key field cannot be empty")
 	assert.Equal(s.T(), "", key)
 }
 
@@ -148,7 +176,8 @@ func (s *HashKeyProviderSuite) TestGetHashKey_Source_Valid() {
 	msg := &wrp.Message{
 		Source: "mac:112233445566/service",
 	}
-	key, err := GetHashKey(msg, HashKeySource, "")
+	hashKey := HashKey{Name: HashKeySource}
+	key, err := hashKey.GetHashKey(msg)
 	assert.NoError(s.T(), err)
 	assert.Equal(s.T(), "112233445566", key)
 }
@@ -157,7 +186,8 @@ func (s *HashKeyProviderSuite) TestGetHashKey_Source_EmptySource() {
 	msg := &wrp.Message{
 		Source: "",
 	}
-	key, err := GetHashKey(msg, HashKeySource, "")
+	hashKey := HashKey{Name: HashKeySource}
+	key, err := hashKey.GetHashKey(msg)
 	assert.Error(s.T(), err)
 	assert.True(s.T(), errors.Is(err, ErrEmptyHashKey))
 	assert.Equal(s.T(), "", key)
@@ -167,8 +197,10 @@ func (s *HashKeyProviderSuite) TestGetHashKey_Source_InvalidFormat() {
 	msg := &wrp.Message{
 		Source: "invalid-format",
 	}
-	key, err := GetHashKey(msg, HashKeySource, "")
+	hashKey := HashKey{Name: HashKeySource}
+	key, err := hashKey.GetHashKey(msg)
 	assert.Error(s.T(), err)
+	assert.Contains(s.T(), err.Error(), "failed to parse device ID from source")
 	assert.Equal(s.T(), "", key)
 }
 
@@ -176,10 +208,60 @@ func (s *HashKeyProviderSuite) TestGetHashKey_InvalidKeyType() {
 	msg := &wrp.Message{
 		Metadata: map[string]string{"hw-deviceid": "mac:112233445566"},
 	}
-	key, err := GetHashKey(msg, HashKeyType("invalid"), "hw-deviceid")
+	hashKey := HashKey{Name: HashKeyType("invalid"), MetadataField: "hw-deviceid"}
+	key, err := hashKey.GetHashKey(msg)
 	assert.Error(s.T(), err)
 	assert.True(s.T(), errors.Is(err, ErrInvalidHashKeyType))
 	assert.Equal(s.T(), "", key)
+}
+
+// Integration tests - combining ParseHashKey and GetHashKey
+func (s *HashKeyProviderSuite) TestIntegration_ParseAndExtract_Metadata() {
+	hashKey, err := ParseHashKey("metadata/hw-deviceid")
+	assert.NoError(s.T(), err)
+
+	msg := &wrp.Message{
+		Metadata: map[string]string{"hw-deviceid": "mac:112233445566"},
+	}
+	key, err := hashKey.GetHashKey(msg)
+	assert.NoError(s.T(), err)
+	assert.Equal(s.T(), "mac:112233445566", key)
+}
+
+func (s *HashKeyProviderSuite) TestIntegration_ParseAndExtract_Source() {
+	hashKey, err := ParseHashKey("source")
+	assert.NoError(s.T(), err)
+
+	msg := &wrp.Message{
+		Source: "mac:112233445566/service",
+	}
+	key, err := hashKey.GetHashKey(msg)
+	assert.NoError(s.T(), err)
+	assert.Equal(s.T(), "112233445566", key)
+}
+
+func (s *HashKeyProviderSuite) TestIntegration_ParseAndExtract_None() {
+	hashKey, err := ParseHashKey("none")
+	assert.NoError(s.T(), err)
+
+	msg := &wrp.Message{
+		Source: "mac:112233445566/service",
+	}
+	key, err := hashKey.GetHashKey(msg)
+	assert.NoError(s.T(), err)
+	assert.Equal(s.T(), "", key)
+}
+
+func (s *HashKeyProviderSuite) TestIntegration_ParseAndExtract_Default() {
+	hashKey, err := ParseHashKey("")
+	assert.NoError(s.T(), err)
+
+	msg := &wrp.Message{
+		Metadata: map[string]string{"hw-deviceid": "mac:112233445566"},
+	}
+	key, err := hashKey.GetHashKey(msg)
+	assert.NoError(s.T(), err)
+	assert.Equal(s.T(), "mac:112233445566", key)
 }
 
 func TestHashKeyProviderSuite(t *testing.T) {

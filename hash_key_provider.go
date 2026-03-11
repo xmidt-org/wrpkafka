@@ -25,6 +25,11 @@ const (
 )
 
 // HashKeyType represents the type of hash key to extract from a WRP message.
+type HashKey struct {
+	Name          HashKeyType
+	MetadataField string
+}
+
 type HashKeyType string
 
 const (
@@ -38,27 +43,28 @@ const (
 	HashKeyNone HashKeyType = "none"
 )
 
-// ParseHashKeyType converts a string to a HashKeyType.
+// ParseHashKey converts a string to a HashKey.
 // The comparison is case-insensitive.
 // Defaults to metadata/hw-deviceid when the input string is empty.
 // Returns an error if the hash key type is not recognized.
-func ParseHashKeyType(s string) (HashKeyType, string, error) {
+func ParseHashKey(s string) (HashKey, error) {
 	if s == "" {
-		return HashKeyMetadata, DefaultMetadataKeyField, nil
+		return HashKey{Name: HashKeyMetadata,
+			MetadataField: DefaultMetadataKeyField}, nil
 	}
 	tokens := strings.Split(s, "/")
 	switch strings.ToLower(tokens[0]) {
 	case string(HashKeyNone):
-		return HashKeyNone, "", nil
+		return HashKey{Name: HashKeyNone}, nil
 	case string(HashKeyMetadata):
 		if (len(tokens) >= 2) && tokens[1] != "" {
-			return HashKeyMetadata, tokens[1], nil
+			return HashKey{Name: HashKeyMetadata, MetadataField: tokens[1]}, nil
 		}
-		return HashKeyMetadata, DefaultMetadataKeyField, nil
+		return HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField}, nil
 	case string(HashKeySource):
-		return HashKeySource, "", nil
+		return HashKey{Name: HashKeySource}, nil
 	default:
-		return "", "", ErrInvalidHashKeyType
+		return HashKey{}, ErrInvalidHashKeyType
 	}
 }
 
@@ -66,23 +72,23 @@ func ParseHashKeyType(s string) (HashKeyType, string, error) {
 // Returns the hash key string or an error if the hash key is required but empty.
 // Defaults to metadata with the default field if keyType is empty.
 // Returns ErrEmptyHashKey if the extracted hash key value is empty or missing.
-func GetHashKey(msg *wrp.Message, keyType HashKeyType, metadataKey string) (string, error) {
-	if keyType == "" {
-		keyType = HashKeyMetadata
-		metadataKey = DefaultMetadataKeyField
+func (h HashKey) GetHashKey(msg *wrp.Message) (string, error) {
+	if h.Name == "" {
+		h.Name = HashKeyMetadata
+		h.MetadataField = DefaultMetadataKeyField
 	}
 
-	switch keyType {
+	switch h.Name {
 	case HashKeyNone:
 		return "", nil
 	case HashKeyMetadata:
-		if metadataKey == "" {
+		if h.MetadataField == "" {
 			return "", fmt.Errorf("metadata key field cannot be empty: %w", ErrEmptyHashKey)
 		}
 		if msg.Metadata == nil {
 			return "", ErrEmptyHashKey
 		}
-		hashKey := msg.Metadata[metadataKey]
+		hashKey := msg.Metadata[h.MetadataField]
 		if hashKey == "" {
 			return "", ErrEmptyHashKey
 		}
@@ -98,6 +104,6 @@ func GetHashKey(msg *wrp.Message, keyType HashKeyType, metadataKey string) (stri
 		return deviceID.ID(), nil
 
 	default:
-		return "", fmt.Errorf("unsupported hash key type: %v: %w", keyType, ErrInvalidHashKeyType)
+		return "", fmt.Errorf("unsupported hash key type: %v: %w", h.Name, ErrInvalidHashKeyType)
 	}
 }
