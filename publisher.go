@@ -405,23 +405,21 @@ func (p *Publisher) buildRecords(msg *wrp.Message) ([]*kgo.Record, []TopicShardS
 			)
 	}
 
-	// Use device ID (from WRP Source) as partition key for ordering
-	deviceID, err := wrp.ParseDeviceID(msg.Source)
-	if err != nil {
-		return nil, nil,
-			errors.Join(
-				ErrValidation,
-				fmt.Errorf("invalid device ID in WRP Source `%s`", msg.Source),
-				err,
-			)
-	}
-
 	// Create records for each topic
 	records := make([]*kgo.Record, 0, len(topics))
 	for _, topic := range topics {
+		partitionKey, err := topic.HashKey.GetHashKey(msg)
+		if err != nil {
+			return nil, nil,
+				errors.Join(
+					ErrValidation,
+					fmt.Errorf("invalid hash key in WRP message `%v`", msg.Metadata),
+					err,
+				)
+		}
 		record := &kgo.Record{
-			Topic:   topic,
-			Key:     deviceID.Bytes(),
+			Topic:   topic.Name,
+			Key:     []byte(partitionKey),
 			Value:   encoded,
 			Headers: dynCfg.headers(msg),
 		}
