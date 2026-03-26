@@ -37,10 +37,10 @@ type DynamicConfig struct {
 	Acks Acks
 }
 
-func (dc *DynamicConfig) match(msg *wrp.Message) (string, TopicShardStrategy, error) {
+func (dc *DynamicConfig) match(msg *wrp.Message) (Topic, TopicShardStrategy, error) {
 	locator, err := wrp.ParseLocator(msg.Destination)
 	if err != nil {
-		return "", TopicShardNone, errors.Join(ErrValidation, err)
+		return Topic{}, TopicShardNone, errors.Join(ErrValidation, err)
 	}
 
 	for _, route := range dc.TopicMap {
@@ -49,8 +49,8 @@ func (dc *DynamicConfig) match(msg *wrp.Message) (string, TopicShardStrategy, er
 		}
 
 		topic := route.selectTopic(msg)
-		if topic == "" {
-			return "", route.TopicShardStrategy,
+		if topic.Name == "" {
+			return Topic{}, route.TopicShardStrategy,
 				errors.New("no topic selected for message")
 		}
 
@@ -58,14 +58,14 @@ func (dc *DynamicConfig) match(msg *wrp.Message) (string, TopicShardStrategy, er
 		return topic, route.TopicShardStrategy, nil
 	}
 
-	return "", TopicShardNone, errors.Join(
+	return Topic{}, TopicShardNone, errors.Join(
 		ErrNoTopicMatch,
 		fmt.Errorf("no topic route matched for event type '%s'", locator.Authority),
 	)
 }
 
-func (dc *DynamicConfig) matches(msg *wrp.Message) ([]string, []TopicShardStrategy, error) {
-	var topics []string
+func (dc *DynamicConfig) matches(msg *wrp.Message) ([]Topic, []TopicShardStrategy, error) {
+	var topics []Topic
 	var shardStrategy []TopicShardStrategy
 
 	locator, err := wrp.ParseLocator(msg.Destination)
@@ -79,7 +79,7 @@ func (dc *DynamicConfig) matches(msg *wrp.Message) ([]string, []TopicShardStrate
 		}
 
 		topic := route.selectTopic(msg)
-		if topic == "" {
+		if topic.Name == "" {
 			return nil, nil, errors.New("no topic selected for message")
 		}
 

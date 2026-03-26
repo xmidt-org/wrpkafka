@@ -103,7 +103,7 @@ func TestProduceQoS(t *testing.T) {
 
 		msg := &wrp.Message{
 			Type:             wrp.SimpleEventMessageType,
-			Source:           "mac:112233445566",
+			Metadata:         map[string]string{"hw-deviceid": "mac:112233445566"},
 			Destination:      "event:test",
 			QualityOfService: 10, // low QoS
 		}
@@ -125,7 +125,7 @@ func TestProduceQoS(t *testing.T) {
 
 		msg := &wrp.Message{
 			Type:             wrp.SimpleEventMessageType,
-			Source:           "mac:112233445566",
+			Metadata:         map[string]string{"hw-deviceid": "mac:112233445566"},
 			Destination:      "event:test",
 			QualityOfService: 50, // medium QoS
 		}
@@ -161,7 +161,7 @@ func TestProduceQoS(t *testing.T) {
 
 				msg := &wrp.Message{
 					Type:             wrp.SimpleEventMessageType,
-					Source:           "mac:112233445566",
+					Metadata:         map[string]string{"hw-deviceid": "mac:112233445566"},
 					Destination:      "event:test",
 					QualityOfService: wrp.QOSValue(tt.qos),
 				}
@@ -212,14 +212,17 @@ func TestProduceErrors(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // cancel immediately
 
-		msg := &wrp.Message{Destination: "event:test"}
+		msg := &wrp.Message{
+			Destination: "event:test",
+			Metadata:    map[string]string{"hw-deviceid": "mac:112233445566"},
+		}
 
 		outcome, err := p.Produce(ctx, msg)
 		assert.Error(t, err)
 		assert.Equal(t, Failed, outcome)
 	})
 
-	t.Run("no records", func(t *testing.T) {
+	t.Run("missing hash key", func(t *testing.T) {
 		t.Parallel()
 		p := newTestPublisher(DynamicConfig{TopicMap: []TopicRoute{{Pattern: "*", Topic: "t"}}})
 		p.clientMu.Lock()
@@ -229,10 +232,15 @@ func TestProduceErrors(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		msg := &wrp.Message{Destination: "event:test"}
+		msg := &wrp.Message{
+			Destination: "event:test",
+			// No metadata - will cause ErrEmptyHashKey since HashKeyDeviceID is the default
+		}
 
 		outcome, err := p.Produce(ctx, msg)
 		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrValidation)
+		assert.Contains(t, err.Error(), "hash key is empty")
 		assert.Equal(t, Failed, outcome)
 	})
 }
@@ -296,7 +304,7 @@ func TestEventListeners(t *testing.T) {
 
 		msg := &wrp.Message{
 			Type:             wrp.SimpleEventMessageType,
-			Source:           "mac:112233445566",
+			Metadata:         map[string]string{"hw-deviceid": "mac:112233445566"},
 			Destination:      "event:test",
 			QualityOfService: 10,
 		}
@@ -345,7 +353,7 @@ func TestEventListeners(t *testing.T) {
 
 		msg := &wrp.Message{
 			Type:             wrp.SimpleEventMessageType,
-			Source:           "mac:112233445566",
+			Metadata:         map[string]string{"hw-deviceid": "mac:112233445566"},
 			Destination:      "event:test",
 			QualityOfService: 10,
 		}
@@ -452,7 +460,7 @@ func TestProduceContextCancellation(t *testing.T) {
 
 	msg := &wrp.Message{
 		Type:             wrp.SimpleEventMessageType,
-		Source:           "mac:112233445566",
+		Metadata:         map[string]string{"hw-deviceid": "mac:112233445566"},
 		Destination:      "event:test",
 		QualityOfService: 50,
 	}
@@ -475,7 +483,7 @@ func TestProduceNotStarted(t *testing.T) {
 
 	msg := &wrp.Message{
 		Type:             wrp.SimpleEventMessageType,
-		Source:           "mac:112233445566",
+		Metadata:         map[string]string{"hw-deviceid": "mac:112233445566"},
 		Destination:      "event:test",
 		QualityOfService: 50,
 	}
@@ -504,7 +512,7 @@ func TestProduce(t *testing.T) {
 			name: "low QoS single topic success",
 			msg: &wrp.Message{
 				Type:             wrp.SimpleEventMessageType,
-				Source:           "mac:112233445566",
+				Metadata:         map[string]string{"hw-deviceid": "mac:112233445566"},
 				Destination:      "event:test",
 				QualityOfService: 10,
 			},
@@ -522,7 +530,7 @@ func TestProduce(t *testing.T) {
 			name: "low QoS multiple topics success",
 			msg: &wrp.Message{
 				Type:             wrp.SimpleEventMessageType,
-				Source:           "mac:112233445566",
+				Metadata:         map[string]string{"hw-deviceid": "mac:112233445566"},
 				Destination:      "event:test",
 				QualityOfService: 0,
 			},
@@ -543,7 +551,7 @@ func TestProduce(t *testing.T) {
 			name: "medium QoS single topic success",
 			msg: &wrp.Message{
 				Type:             wrp.SimpleEventMessageType,
-				Source:           "mac:112233445566",
+				Metadata:         map[string]string{"hw-deviceid": "mac:112233445566"},
 				Destination:      "event:test",
 				QualityOfService: 50,
 			},
@@ -561,7 +569,7 @@ func TestProduce(t *testing.T) {
 			name: "medium QoS multiple topics success",
 			msg: &wrp.Message{
 				Type:             wrp.SimpleEventMessageType,
-				Source:           "mac:112233445566",
+				Metadata:         map[string]string{"hw-deviceid": "mac:112233445566"},
 				Destination:      "event:test",
 				QualityOfService: 74,
 			},
@@ -583,7 +591,7 @@ func TestProduce(t *testing.T) {
 			name: "high QoS single topic success",
 			msg: &wrp.Message{
 				Type:             wrp.SimpleEventMessageType,
-				Source:           "mac:112233445566",
+				Metadata:         map[string]string{"hw-deviceid": "mac:112233445566"},
 				Destination:      "event:test",
 				QualityOfService: 99,
 			},
@@ -603,7 +611,7 @@ func TestProduce(t *testing.T) {
 			name: "high QoS multiple topics success",
 			msg: &wrp.Message{
 				Type:             wrp.SimpleEventMessageType,
-				Source:           "mac:112233445566",
+				Metadata:         map[string]string{"hw-deviceid": "mac:112233445566"},
 				Destination:      "event:test",
 				QualityOfService: 75,
 			},
@@ -626,7 +634,7 @@ func TestProduce(t *testing.T) {
 			name: "high QoS sync failure",
 			msg: &wrp.Message{
 				Type:             wrp.SimpleEventMessageType,
-				Source:           "mac:112233445566",
+				Metadata:         map[string]string{"hw-deviceid": "mac:112233445566"},
 				Destination:      "event:test",
 				QualityOfService: 80,
 			},
@@ -646,7 +654,7 @@ func TestProduce(t *testing.T) {
 			name: "QoS boundary values",
 			msg: &wrp.Message{
 				Type:             wrp.SimpleEventMessageType,
-				Source:           "mac:112233445566",
+				Metadata:         map[string]string{"hw-deviceid": "mac:112233445566"},
 				Destination:      "event:test",
 				QualityOfService: 24, // boundary between low and medium
 			},
@@ -664,7 +672,7 @@ func TestProduce(t *testing.T) {
 			name: "QoS boundary values - 25",
 			msg: &wrp.Message{
 				Type:             wrp.SimpleEventMessageType,
-				Source:           "mac:112233445566",
+				Metadata:         map[string]string{"hw-deviceid": "mac:112233445566"},
 				Destination:      "event:test",
 				QualityOfService: 25, // boundary between low and medium
 			},
@@ -682,7 +690,7 @@ func TestProduce(t *testing.T) {
 			name: "no topic match",
 			msg: &wrp.Message{
 				Type:             wrp.SimpleEventMessageType,
-				Source:           "mac:112233445566",
+				Metadata:         map[string]string{"hw-deviceid": "mac:112233445566"},
 				Destination:      "event:nomatch",
 				QualityOfService: 50,
 			},
@@ -697,10 +705,10 @@ func TestProduce(t *testing.T) {
 			expectCalls:    map[string]int{},
 		},
 		{
-			name: "invalid device ID",
+			name: "invalid hash key",
 			msg: &wrp.Message{
-				Type:             wrp.SimpleEventMessageType,
-				Source:           "invalid-device-id",
+				Type: wrp.SimpleEventMessageType,
+				//Metadata:         map[string]string{"hw-deviceid": "invalid-device-id"},
 				Destination:      "event:test",
 				QualityOfService: 50,
 			},
@@ -711,14 +719,14 @@ func TestProduce(t *testing.T) {
 				// No calls expected
 			},
 			expectedResult: Failed,
-			expectedError:  "invalid device ID",
+			expectedError:  "hash key is empty",
 			expectCalls:    map[string]int{},
 		},
 		{
 			name: "invalid destination",
 			msg: &wrp.Message{
 				Type:             wrp.SimpleEventMessageType,
-				Source:           "mac:112233445566",
+				Metadata:         map[string]string{"hw-deviceid": "mac:112233445566"},
 				Destination:      "invalid-destination",
 				QualityOfService: 50,
 			},
@@ -789,7 +797,7 @@ func TestProduceAsyncErrors(t *testing.T) {
 			name: "medium QoS single topic - async retry exhausted error",
 			msg: &wrp.Message{
 				Type:             wrp.SimpleEventMessageType,
-				Source:           "mac:112233445566",
+				Metadata:         map[string]string{"hw-deviceid": "mac:112233445566"},
 				Destination:      "event:test",
 				QualityOfService: 50,
 			},
@@ -807,7 +815,7 @@ func TestProduceAsyncErrors(t *testing.T) {
 			name: "medium QoS single topic - async timeout error",
 			msg: &wrp.Message{
 				Type:             wrp.SimpleEventMessageType,
-				Source:           "mac:112233445566",
+				Metadata:         map[string]string{"hw-deviceid": "mac:112233445566"},
 				Destination:      "event:test",
 				QualityOfService: 60,
 			},
@@ -825,7 +833,7 @@ func TestProduceAsyncErrors(t *testing.T) {
 			name: "medium QoS single topic - async success (no error)",
 			msg: &wrp.Message{
 				Type:             wrp.SimpleEventMessageType,
-				Source:           "mac:112233445566",
+				Metadata:         map[string]string{"hw-deviceid": "mac:112233445566"},
 				Destination:      "event:test",
 				QualityOfService: 25,
 			},

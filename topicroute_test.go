@@ -25,6 +25,7 @@ func TestTopicRoute_Validate(t *testing.T) {
 			route: TopicRoute{
 				Pattern: "event.type",
 				Topic:   "my-topic",
+				HashKey: HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			wantErr: false,
 		},
@@ -34,6 +35,7 @@ func TestTopicRoute_Validate(t *testing.T) {
 				Pattern:            "event.*",
 				Topics:             []string{"topic-1", "topic-2"},
 				TopicShardStrategy: TopicShardRoundRobin,
+				HashKey:            HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			wantErr: false,
 		},
@@ -42,6 +44,7 @@ func TestTopicRoute_Validate(t *testing.T) {
 			route: TopicRoute{
 				Pattern: "",
 				Topic:   "my-topic",
+				HashKey: HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			wantErr: true,
 		},
@@ -51,6 +54,7 @@ func TestTopicRoute_Validate(t *testing.T) {
 				Pattern: "event.type",
 				Topic:   "my-topic",
 				Topics:  []string{"topic-1", "topic-2"},
+				HashKey: HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			wantErr: true,
 		},
@@ -60,6 +64,7 @@ func TestTopicRoute_Validate(t *testing.T) {
 				Pattern:            "event.type",
 				Topic:              "my-topic",
 				TopicShardStrategy: TopicShardRoundRobin,
+				HashKey:            HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			wantErr: true,
 		},
@@ -68,6 +73,7 @@ func TestTopicRoute_Validate(t *testing.T) {
 			route: TopicRoute{
 				Pattern: "event.*",
 				Topics:  []string{"topic-1", "topic-2"},
+				HashKey: HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			wantErr: true,
 		},
@@ -75,6 +81,7 @@ func TestTopicRoute_Validate(t *testing.T) {
 			name: "invalid no topics or topic",
 			route: TopicRoute{
 				Pattern: "event.type",
+				HashKey: HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			wantErr: true,
 		},
@@ -84,6 +91,7 @@ func TestTopicRoute_Validate(t *testing.T) {
 				Pattern:            "event.*",
 				Topics:             []string{"topic-1", "topic-2"},
 				TopicShardStrategy: "unknownstrategy",
+				HashKey:            HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			wantErr: true,
 		},
@@ -140,6 +148,7 @@ func TestSelectRoundRobin(t *testing.T) {
 			route := &TopicRoute{
 				Topics:  tt.topics,
 				counter: &atomic.Uint64{},
+				HashKey: HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			}
 
 			for i := 0; i < tt.calls; i++ {
@@ -193,9 +202,13 @@ func TestSelectByDeviceID(t *testing.T) {
 			route := &TopicRoute{
 				Topics:  tt.topics,
 				counter: &atomic.Uint64{},
+				HashKey: HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			}
 
-			msg := &wrp.Message{Source: tt.deviceID}
+			msg := &wrp.Message{}
+			if tt.deviceID != "" {
+				msg.Metadata = map[string]string{DefaultMetadataKeyField: tt.deviceID}
+			}
 			got := route.selectByDeviceID(msg)
 
 			assert.Equal(t, tt.want, got)
@@ -265,6 +278,7 @@ func TestSelectByMetadata(t *testing.T) {
 			route := &TopicRoute{
 				Topics:  tt.topics,
 				counter: &atomic.Uint64{},
+				HashKey: HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			}
 
 			msg := &wrp.Message{Metadata: tt.metadata}
@@ -284,12 +298,13 @@ func TestSelectTopic(t *testing.T) {
 		route  TopicRoute
 		msg    *wrp.Message
 		want   string
-		verify func(t *testing.T, route *TopicRoute, got string)
+		verify func(t *testing.T, route *TopicRoute, got Topic)
 	}{
 		{
 			name: "single topic route",
 			route: TopicRoute{
-				Topic: "my-topic",
+				Topic:   "my-topic",
+				HashKey: HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			msg:  &wrp.Message{Source: "mac:112233445566"},
 			want: "my-topic",
@@ -300,6 +315,7 @@ func TestSelectTopic(t *testing.T) {
 				Topics:             []string{"topic-0", "topic-1"},
 				TopicShardStrategy: TopicShardRoundRobin,
 				counter:            &atomic.Uint64{},
+				HashKey:            HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			msg:  &wrp.Message{Source: "mac:112233445566"},
 			want: "topic-0",
@@ -310,12 +326,13 @@ func TestSelectTopic(t *testing.T) {
 				Topics:             []string{"topic-0", "topic-1", "topic-2"},
 				TopicShardStrategy: TopicShardDeviceID,
 				counter:            &atomic.Uint64{},
+				HashKey:            HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			msg: &wrp.Message{Source: "mac:112233445566"},
-			verify: func(t *testing.T, route *TopicRoute, got string) {
-				assert.NotEmpty(t, got)
+			verify: func(t *testing.T, route *TopicRoute, got Topic) {
+				assert.NotEmpty(t, got.Name)
 				// Verify it's one of the configured topics
-				assert.Contains(t, route.Topics, got)
+				assert.Contains(t, route.Topics, got.Name)
 			},
 		},
 		{
@@ -324,14 +341,15 @@ func TestSelectTopic(t *testing.T) {
 				Topics:             []string{"topic-0", "topic-1"},
 				TopicShardStrategy: "metadata:region",
 				counter:            &atomic.Uint64{},
+				HashKey:            HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			msg: &wrp.Message{
 				Source:   "mac:112233445566",
 				Metadata: map[string]string{"region": "us-west"},
 			},
-			verify: func(t *testing.T, route *TopicRoute, got string) {
-				assert.NotEmpty(t, got)
-				assert.Contains(t, route.Topics, got)
+			verify: func(t *testing.T, route *TopicRoute, got Topic) {
+				assert.NotEmpty(t, got.Name)
+				assert.Contains(t, route.Topics, got.Name)
 			},
 		},
 		{
@@ -340,6 +358,7 @@ func TestSelectTopic(t *testing.T) {
 				Topics:             []string{"topic-0", "topic-1"},
 				TopicShardStrategy: "unknown-strategy",
 				counter:            &atomic.Uint64{},
+				HashKey:            HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 			},
 			msg:  &wrp.Message{Source: "mac:112233445566"},
 			want: "",
@@ -354,7 +373,7 @@ func TestSelectTopic(t *testing.T) {
 			if tt.verify != nil {
 				tt.verify(t, &tt.route, got)
 			} else {
-				assert.Equal(t, tt.want, got)
+				assert.Equal(t, tt.want, got.Name)
 			}
 		})
 	}
@@ -367,6 +386,7 @@ func TestSelectRoundRobin_Concurrency(t *testing.T) {
 	route := &TopicRoute{
 		Topics:  []string{"topic-0", "topic-1", "topic-2"},
 		counter: &atomic.Uint64{},
+		HashKey: HashKey{Name: HashKeyMetadata, MetadataField: DefaultMetadataKeyField},
 	}
 
 	const goroutines = 10
