@@ -37,33 +37,6 @@ type DynamicConfig struct {
 	Acks Acks
 }
 
-func (dc *DynamicConfig) match(msg *wrp.Message) (Topic, TopicShardStrategy, error) {
-	locator, err := wrp.ParseLocator(msg.Destination)
-	if err != nil {
-		return Topic{}, TopicShardNone, errors.Join(ErrValidation, err)
-	}
-
-	for _, route := range dc.TopicMap {
-		if !route.matcher.matches(locator.Authority) {
-			continue
-		}
-
-		topic := route.selectTopic(msg)
-		if topic.Name == "" {
-			return Topic{}, route.TopicShardStrategy,
-				errors.New("no topic selected for message")
-		}
-
-		// Success
-		return topic, route.TopicShardStrategy, nil
-	}
-
-	return Topic{}, TopicShardNone, errors.Join(
-		ErrNoTopicMatch,
-		fmt.Errorf("no topic route matched for event type '%s'", locator.Authority),
-	)
-}
-
 func (dc *DynamicConfig) matches(msg *wrp.Message) ([]Topic, []TopicShardStrategy, error) {
 	var topics []Topic
 	var shardStrategy []TopicShardStrategy
