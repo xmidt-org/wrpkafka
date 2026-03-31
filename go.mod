@@ -6,7 +6,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go/modules/kafka v0.41.0
 	github.com/twmb/franz-go v1.20.7
-	github.com/xmidt-org/eventor v1.0.36
+	github.com/xmidt-org/eventor v1.0.38
 	github.com/xmidt-org/wrp-go/v5 v5.4.0
 )
 
