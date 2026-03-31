@@ -161,6 +161,27 @@ func (s *HashKeyProviderSuite) TestGetHashKey_Metadata_MissingField() {
 	assert.Equal(s.T(), "", key)
 }
 
+func (s *HashKeyProviderSuite) TestGetHashKey_Metadata_Valid_LeadingSlash() {
+	msg := &wrp.Message{
+		Metadata: map[string]string{"/hw-deviceid": "mac:112233445566"},
+	}
+	hashKey := HashKey{Name: HashKeyMetadata, MetadataField: "hw-deviceid"}
+	key, err := hashKey.GetHashKey(msg)
+	assert.NoError(s.T(), err)
+	assert.Equal(s.T(), "mac:112233445566", key)
+}
+
+func (s *HashKeyProviderSuite) TestGetHashKey_Metadata_Empty_LeadingSlash() {
+	msg := &wrp.Message{
+		Metadata: map[string]string{"/hw-deviceid": ""},
+	}
+	hashKey := HashKey{Name: HashKeyMetadata, MetadataField: "hw-deviceid"}
+	key, err := hashKey.GetHashKey(msg)
+	assert.Error(s.T(), err)
+	assert.True(s.T(), errors.Is(err, ErrEmptyHashKey))
+	assert.Equal(s.T(), "", key)
+}
+
 func (s *HashKeyProviderSuite) TestGetHashKey_Metadata_EmptyFieldName() {
 	msg := &wrp.Message{
 		Metadata: map[string]string{"hw-deviceid": "mac:112233445566"},
@@ -262,6 +283,17 @@ func (s *HashKeyProviderSuite) TestIntegration_ParseAndExtract_Default() {
 	key, err := hashKey.GetHashKey(msg)
 	assert.NoError(s.T(), err)
 	assert.Equal(s.T(), "mac:112233445566", key)
+}
+func (s *HashKeyProviderSuite) TestIntegration_ParseAndExtract_MetadataWithSlash() {
+	hashKey, err := ParseHashKey("metadata/custom-field")
+	assert.NoError(s.T(), err)
+
+	msg := &wrp.Message{
+		Metadata: map[string]string{"/custom-field": "slash-prefixed-value"},
+	}
+	key, err := hashKey.GetHashKey(msg)
+	assert.NoError(s.T(), err)
+	assert.Equal(s.T(), "slash-prefixed-value", key)
 }
 
 func TestHashKeyProviderSuite(t *testing.T) {

@@ -88,7 +88,15 @@ func (h HashKey) GetHashKey(msg *wrp.Message) (string, error) {
 		if msg.Metadata == nil {
 			return "", ErrEmptyHashKey
 		}
-		hashKey := msg.Metadata[h.MetadataField]
+
+		// Checking for both the raw field and the field with a leading slash
+		hashKey, ok := msg.Metadata[h.MetadataField]
+		if !ok {
+			hashKey, ok = msg.Metadata["/"+h.MetadataField]
+			if !ok {
+				return "", ErrEmptyHashKey
+			}
+		}
 		if hashKey == "" {
 			return "", ErrEmptyHashKey
 		}
