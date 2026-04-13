@@ -46,11 +46,9 @@ func setupKafka(t *testing.T) (*kafka.KafkaContainer, string) {
 	// Configure testcontainers to use Podman if DOCKER_HOST is set
 	configureTestContainersForPodman(t)
 
-	// Start Kafka container
-	// Use confluent-local image which is designed for testcontainers
-	// Using specific version tag since testcontainers validates version for KRaft mode
-	kafkaContainer, err := kafka.Run(ctx,
-		"confluentinc/confluent-local:7.8.0",
+	// Start Kafka container using testcontainers' default RunContainer
+	// which uses the recommended image and proper wait strategies
+	kafkaContainer, err := kafka.RunContainer(ctx,
 		kafka.WithClusterID("test-cluster"),
 	)
 	require.NoError(t, err, "Failed to start Kafka container")
