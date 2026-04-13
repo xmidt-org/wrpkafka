@@ -486,6 +486,29 @@ func TestToKgoOpts(t *testing.T) {
 			},
 		},
 		{
+			name: "prometheus metrics with namespace only",
+			publisher: &Publisher{
+				Brokers:             []string{"localhost:9092"},
+				PrometheusNamespace: "kafka_producer",
+			},
+		},
+		{
+			name: "prometheus metrics with namespace and subsystem",
+			publisher: &Publisher{
+				Brokers:             []string{"localhost:9092"},
+				PrometheusNamespace: "kafka_producer",
+				PrometheusSubsystem: "wrp",
+			},
+		},
+		{
+			name: "prometheus metrics disabled (empty namespace)",
+			publisher: &Publisher{
+				Brokers:             []string{"localhost:9092"},
+				PrometheusNamespace: "",
+				PrometheusSubsystem: "ignored",
+			},
+		},
+		{
 			name: "all options",
 			publisher: &Publisher{
 				Brokers: []string{"localhost:9092"},
@@ -532,4 +555,47 @@ func TestToKgoOpts_CreatesValidClient(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, client)
 	client.Close()
+}
+
+// TestToKgoOpts_PrometheusMetrics verifies Prometheus metrics can be configured.
+func TestToKgoOpts_PrometheusMetrics(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		namespace string
+		subsystem string
+	}{
+		{
+			name:      "namespace only",
+			namespace: "test_kafka",
+			subsystem: "",
+		},
+		{
+			name:      "namespace and subsystem",
+			namespace: "test_kafka",
+			subsystem: "producer",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			publisher := &Publisher{
+				Brokers:             []string{"localhost:9092"},
+				PrometheusNamespace: tt.namespace,
+				PrometheusSubsystem: tt.subsystem,
+			}
+
+			opts := publisher.toKgoOpts()
+			require.NotEmpty(t, opts)
+
+			// Should be able to create a client with metrics hook
+			client, err := kgo.NewClient(opts...)
+			require.NoError(t, err)
+			require.NotNil(t, client)
+			client.Close()
+		})
+	}
 }
