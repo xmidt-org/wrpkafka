@@ -14,6 +14,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/sasl"
+	"github.com/twmb/franz-go/plugin/kprom"
 	"github.com/xmidt-org/eventor"
 	"github.com/xmidt-org/wrp-go/v5"
 )
@@ -115,6 +116,16 @@ type Publisher struct {
 	// For dynamic listener management after Start(), use AddPublishEventListener().
 	// Optional.
 	InitialPublishEventListeners []func(*PublishEvent)
+
+	// PrometheusNamespace sets the namespace for Prometheus metrics exported by franz-go.
+	// If empty, Prometheus metrics are disabled.
+	// Optional. Default: "" (metrics disabled).
+	PrometheusNamespace string
+
+	// PrometheusSubsystem sets the subsystem for Prometheus metrics exported by franz-go.
+	// Only used when PrometheusNamespace is set.
+	// Optional. Default: "" (no subsystem).
+	PrometheusSubsystem string
 
 	// --- INTERNAL FIELDS (not for user configuration) ---
 
@@ -610,6 +621,16 @@ func (p *Publisher) toKgoOpts() []kgo.Opt {
 		case CompressionNone, "":
 			opts = append(opts, kgo.ProducerBatchCompression(kgo.NoCompression()))
 		}
+	}
+
+	// Add Prometheus metrics if configured
+	if p.PrometheusNamespace != "" {
+		var metricsOpts []kprom.Opt
+		if p.PrometheusSubsystem != "" {
+			metricsOpts = append(metricsOpts, kprom.Subsystem(p.PrometheusSubsystem))
+		}
+		metrics := kprom.NewMetrics(p.PrometheusNamespace, metricsOpts...)
+		opts = append(opts, kgo.WithHooks(metrics))
 	}
 
 	return opts
