@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/kafka"
+	"github.com/testcontainers/testcontainers-go/wait"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/xmidt-org/wrp-go/v5"
 	"github.com/xmidt-org/wrpkafka"
@@ -46,10 +48,14 @@ func setupKafka(t *testing.T) (*kafka.KafkaContainer, string) {
 	// Configure testcontainers to use Podman if DOCKER_HOST is set
 	configureTestContainersForPodman(t)
 
-	// Start Kafka container using testcontainers' default RunContainer
-	// which uses the recommended image and proper wait strategies
-	kafkaContainer, err := kafka.RunContainer(ctx,
+	// Start Kafka container
+	// Using port-based wait strategy instead of log parsing for reliability
+	kafkaContainer, err := kafka.Run(ctx,
+		"confluentinc/confluent-local:7.8.0",
 		kafka.WithClusterID("test-cluster"),
+		testcontainers.WithWaitStrategy(
+			wait.ForListeningPort("9093/tcp").WithStartupTimeout(90*time.Second),
+		),
 	)
 	require.NoError(t, err, "Failed to start Kafka container")
 
