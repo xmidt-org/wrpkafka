@@ -127,6 +127,14 @@ type Publisher struct {
 	// Optional. Default: "" (no subsystem).
 	PrometheusSubsystem string
 
+	// DenyNilPartitionKey requires valid partition keys and fails publishing when the hash key
+	// cannot be extracted from the message (missing or empty).
+	// When false (default), records can have nil keys and rely on Kafka's default partitioner
+	// for round-robin distribution across partitions.
+	// When true, publishing fails if the partition key is missing/empty.
+	// Optional. Default: false (allow nil partition keys).
+	DenyNilPartitionKey bool
+
 	// --- INTERNAL FIELDS (not for user configuration) ---
 
 	// logger is for internal use only.
@@ -419,18 +427,31 @@ func (p *Publisher) buildRecords(msg *wrp.Message) ([]*kgo.Record, []TopicShardS
 	// Create records for each topic
 	records := make([]*kgo.Record, 0, len(topics))
 	for _, topic := range topics {
+		// Always try to get partition key from message
 		partitionKey, err := topic.HashKey.GetHashKey(msg)
-		if err != nil {
-			return nil, nil,
-				errors.Join(
-					ErrValidation,
-					fmt.Errorf("invalid hash key in WRP message `%v`", msg.Metadata),
-					err,
-				)
+
+		// Determine the key to use
+		var key []byte
+		if err != nil || partitionKey == "" {
+			// Key extraction failed or returned empty
+			if p.DenyNilPartitionKey {
+				// Nil keys denied - return error
+				return nil, nil,
+					errors.Join(
+						ErrValidation,
+						fmt.Errorf("invalid hash key in WRP message `%v`", msg.Metadata),
+						err,
+					)
+			}
+			// Nil keys allowed - key remains nil for round-robin distribution
+		} else {
+			// Successfully got partition key from message
+			key = []byte(partitionKey)
 		}
+
 		record := &kgo.Record{
 			Topic:   topic.Name,
-			Key:     []byte(partitionKey),
+			Key:     key,
 			Value:   encoded,
 			Headers: dynCfg.headers(msg),
 		}
