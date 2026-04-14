@@ -8,7 +8,7 @@ require (
 	github.com/testcontainers/testcontainers-go/modules/kafka v0.42.0
 	github.com/twmb/franz-go v1.20.7
 	github.com/twmb/franz-go/plugin/kprom v1.3.0
-	github.com/xmidt-org/eventor v1.0.43
+	github.com/xmidt-org/eventor v1.0.45
 	github.com/xmidt-org/wrp-go/v5 v5.4.1
 )
 
