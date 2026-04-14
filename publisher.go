@@ -127,13 +127,13 @@ type Publisher struct {
 	// Optional. Default: "" (no subsystem).
 	PrometheusSubsystem string
 
-	// AllowNilPartitionKey allows records to have nil partition keys when the hash key
+	// DenyNilPartitionKey requires valid partition keys and fails publishing when the hash key
 	// cannot be extracted from the message (missing or empty).
-	// When false (default), publishing fails if the partition key is missing/empty.
-	// When true, records use nil keys and rely on Kafka's default partitioner for
-	// round-robin distribution across partitions.
-	// Optional. Default: false (require valid partition keys).
-	AllowNilPartitionKey bool
+	// When false (default), records can have nil keys and rely on Kafka's default partitioner
+	// for round-robin distribution across partitions.
+	// When true, publishing fails if the partition key is missing/empty.
+	// Optional. Default: false (allow nil partition keys).
+	DenyNilPartitionKey bool
 
 	// --- INTERNAL FIELDS (not for user configuration) ---
 
@@ -434,8 +434,8 @@ func (p *Publisher) buildRecords(msg *wrp.Message) ([]*kgo.Record, []TopicShardS
 		var key []byte
 		if err != nil || partitionKey == "" {
 			// Key extraction failed or returned empty
-			if !p.AllowNilPartitionKey {
-				// Nil keys not allowed - return error
+			if p.DenyNilPartitionKey {
+				// Nil keys denied - return error
 				return nil, nil,
 					errors.Join(
 						ErrValidation,

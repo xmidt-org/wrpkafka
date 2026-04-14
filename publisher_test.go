@@ -225,6 +225,7 @@ func TestProduceErrors(t *testing.T) {
 	t.Run("missing hash key", func(t *testing.T) {
 		t.Parallel()
 		p := newTestPublisher(DynamicConfig{TopicMap: []TopicRoute{{Pattern: "*", Topic: "t"}}})
+		p.DenyNilPartitionKey = true // Require valid partition keys
 		p.clientMu.Lock()
 		p.client = &mockKafkaClient{}
 		p.clientMu.Unlock()
@@ -504,6 +505,7 @@ func TestProduce(t *testing.T) {
 		msg            *wrp.Message
 		dynamicConfig  DynamicConfig
 		mockSetup      func(m *mockKafkaClient)
+		publisherSetup func(p *Publisher) // Optional: additional publisher configuration
 		expectedResult Outcome
 		expectedError  string
 		expectCalls    map[string]int // method name -> call count
@@ -718,6 +720,9 @@ func TestProduce(t *testing.T) {
 			mockSetup: func(m *mockKafkaClient) {
 				// No calls expected
 			},
+			publisherSetup: func(p *Publisher) {
+				p.DenyNilPartitionKey = true // Require valid partition keys
+			},
 			expectedResult: Failed,
 			expectedError:  "hash key is empty",
 			expectCalls:    map[string]int{},
@@ -751,6 +756,9 @@ func TestProduce(t *testing.T) {
 			tt.mockSetup(mockClient)
 
 			p := newTestPublisher(tt.dynamicConfig)
+			if tt.publisherSetup != nil {
+				tt.publisherSetup(p)
+			}
 			p.clientMu.Lock()
 			p.client = mockClient
 			p.clientMu.Unlock()

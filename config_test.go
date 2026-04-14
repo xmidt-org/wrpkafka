@@ -509,10 +509,10 @@ func TestToKgoOpts(t *testing.T) {
 			},
 		},
 		{
-			name: "allow nil partition keys",
+			name: "deny nil partition keys",
 			publisher: &Publisher{
-				Brokers:              []string{"localhost:9092"},
-				AllowNilPartitionKey: true,
+				Brokers:             []string{"localhost:9092"},
+				DenyNilPartitionKey: true,
 			},
 		},
 		{
