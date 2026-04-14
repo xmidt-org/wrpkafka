@@ -14,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/xmidt-org/wrp-go/v5"
 	"github.com/xmidt-org/wrpkafka"
 )
 
@@ -475,4 +476,115 @@ func TestIntegration_StartStopMultipleTimes(t *testing.T) {
 	// Verify both messages arrived
 	records := consumeMessages(t, broker, "lifecycle-test", messageConsumeWait)
 	assert.GreaterOrEqual(t, len(records), 2, "Expected at least 2 messages")
+}
+
+// TestIntegration_AllowNilPartitionKey tests the AllowNilPartitionKey configuration.
+//
+// Verifies:
+// - With AllowNilPartitionKey=false, publishing fails when partition key cannot be extracted
+// - With AllowNilPartitionKey=true, publishing succeeds with nil keys
+// - When partition key is present, it's always used regardless of config
+func TestIntegration_AllowNilPartitionKey(t *testing.T) {
+	t.Parallel()
+	_, broker := setupKafka(t)
+
+	t.Run("default behavior rejects missing keys", func(t *testing.T) {
+		pub := &wrpkafka.Publisher{
+			Brokers:                []string{broker},
+			AllowAutoTopicCreation: true,
+			AllowNilPartitionKey:   false, // Explicitly false (default)
+			InitialDynamicConfig: wrpkafka.DynamicConfig{
+				TopicMap: []wrpkafka.TopicRoute{
+					{Pattern: "*", Topic: "reject-nil-keys"},
+				},
+			},
+		}
+
+		err := pub.Start()
+		require.NoError(t, err)
+		defer pub.Stop(context.Background())
+
+		// Create message without metadata (partition key will fail to extract)
+		msgWithoutKey := &wrp.Message{
+			Type:        wrp.SimpleEventMessageType,
+			Source:      "", // Empty source
+			Destination: "event:test-event",
+			Payload:     []byte("test"),
+			Metadata:    nil, // No metadata
+		}
+
+		// Should fail because partition key is missing and AllowNilPartitionKey=false
+		_, err = pub.Produce(context.Background(), msgWithoutKey)
+		assert.Error(t, err, "Should fail when partition key is missing and AllowNilPartitionKey=false")
+	})
+
+	t.Run("allow nil keys when configured", func(t *testing.T) {
+		pub := &wrpkafka.Publisher{
+			Brokers:                []string{broker},
+			AllowAutoTopicCreation: true,
+			AllowNilPartitionKey:   true, // Allow nil partition keys
+			InitialDynamicConfig: wrpkafka.DynamicConfig{
+				TopicMap: []wrpkafka.TopicRoute{
+					{Pattern: "*", Topic: "allow-nil-keys"},
+				},
+			},
+		}
+
+		err := pub.Start()
+		require.NoError(t, err)
+		defer pub.Stop(context.Background())
+
+		// Create message without metadata (partition key will be nil)
+		msgWithoutKey := &wrp.Message{
+			Type:        wrp.SimpleEventMessageType,
+			Source:      "", // Empty source
+			Destination: "event:test-event",
+			Payload:     []byte("test-without-key"),
+			Metadata:    nil, // No metadata
+		}
+
+		// Should succeed with nil partition key
+		outcome, err := pub.Produce(context.Background(), msgWithoutKey)
+		require.NoError(t, err)
+		assert.Equal(t, wrpkafka.Accepted, outcome)
+
+		// Verify message in Kafka with nil key
+		records := consumeMessages(t, broker, "allow-nil-keys", messageConsumeWait)
+		require.Len(t, records, 1, "Expected 1 message")
+		assert.Nil(t, records[0].Key, "Partition key should be nil")
+
+		// Verify payload
+		decoded := decodeWRPMessage(t, records[0])
+		assert.Equal(t, string(msgWithoutKey.Payload), string(decoded.Payload))
+	})
+
+	t.Run("uses partition key when present even with AllowNilPartitionKey=true", func(t *testing.T) {
+		pub := &wrpkafka.Publisher{
+			Brokers:                []string{broker},
+			AllowAutoTopicCreation: true,
+			AllowNilPartitionKey:   true, // Allow nil, but use key if present
+			InitialDynamicConfig: wrpkafka.DynamicConfig{
+				TopicMap: []wrpkafka.TopicRoute{
+					{Pattern: "*", Topic: "prefer-keys"},
+				},
+			},
+		}
+
+		err := pub.Start()
+		require.NoError(t, err)
+		defer pub.Stop(context.Background())
+
+		// Create message WITH valid partition key
+		msgWithKey := createTestMessage("test-event", "mac:112233445566", 75)
+
+		outcome, err := pub.Produce(context.Background(), msgWithKey)
+		require.NoError(t, err)
+		assert.Equal(t, wrpkafka.Accepted, outcome)
+
+		// Verify message uses the partition key even though AllowNilPartitionKey=true
+		records := consumeMessages(t, broker, "prefer-keys", messageConsumeWait)
+		require.Len(t, records, 1, "Expected 1 message")
+		assert.NotNil(t, records[0].Key, "Partition key should not be nil when available")
+		assert.Equal(t, "mac:112233445566", string(records[0].Key), "Should use partition key from message")
+	})
 }
