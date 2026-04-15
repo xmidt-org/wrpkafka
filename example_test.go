@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/xmidt-org/wrp-go/v5"
 	"github.com/xmidt-org/wrpkafka"
 )
@@ -401,4 +402,37 @@ func ExamplePublisher_AddPublishEventListener() {
 
 	fmt.Println("Event listener registered")
 	// Output: Event listener registered
+}
+
+// Example_customPrometheusRegistry demonstrates using a custom Prometheus registry
+// instead of the default registry. This is useful when your application manages
+// its own Prometheus registry and you want all metrics in one place.
+func Example_customPrometheusRegistry() {
+	// Create a custom Prometheus registry for your application
+	customRegistry := prometheus.NewRegistry()
+
+	publisher := &wrpkafka.Publisher{
+		Brokers: []string{"localhost:9092"},
+		InitialDynamicConfig: wrpkafka.DynamicConfig{
+			TopicMap: []wrpkafka.TopicRoute{
+				{Pattern: "*", Topic: "events"},
+			},
+		},
+
+		// Configure Prometheus metrics with custom registry
+		PrometheusNamespace:  "my_app",
+		PrometheusSubsystem:  "kafka",
+		PrometheusRegisterer: customRegistry, // Use custom registry instead of default
+	}
+
+	if err := publisher.Start(); err != nil {
+		log.Fatal(err)
+	}
+	defer publisher.Stop(context.Background())
+
+	// Now all kafka metrics are registered in customRegistry
+	// You can gather metrics from it with customRegistry.Gather()
+
+	fmt.Println("Custom Prometheus registry configured")
+	// Output: Custom Prometheus registry configured
 }
