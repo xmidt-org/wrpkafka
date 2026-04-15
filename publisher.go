@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/sasl"
 	"github.com/twmb/franz-go/plugin/kprom"
@@ -126,6 +127,16 @@ type Publisher struct {
 	// Only used when PrometheusNamespace is set.
 	// Optional. Default: "" (no subsystem).
 	PrometheusSubsystem string
+
+	// PrometheusRegisterer is a custom Prometheus registerer to use for metrics.
+	// If nil, the default Prometheus registry is used.
+	// Only used when PrometheusNamespace is set.
+	// Optional. Default: nil (uses default registry).
+	PrometheusRegisterer interface {
+		Register(prometheus.Collector) error
+		MustRegister(...prometheus.Collector)
+		Unregister(prometheus.Collector) bool
+	}
 
 	// DenyNilPartitionKey requires valid partition keys and fails publishing when the hash key
 	// cannot be extracted from the message (missing or empty).
@@ -649,6 +660,9 @@ func (p *Publisher) toKgoOpts() []kgo.Opt {
 		var metricsOpts []kprom.Opt
 		if p.PrometheusSubsystem != "" {
 			metricsOpts = append(metricsOpts, kprom.Subsystem(p.PrometheusSubsystem))
+		}
+		if p.PrometheusRegisterer != nil {
+			metricsOpts = append(metricsOpts, kprom.Registerer(p.PrometheusRegisterer))
 		}
 		metrics := kprom.NewMetrics(p.PrometheusNamespace, metricsOpts...)
 		opts = append(opts, kgo.WithHooks(metrics))

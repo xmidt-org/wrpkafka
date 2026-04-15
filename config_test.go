@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -605,4 +606,32 @@ func TestToKgoOpts_PrometheusMetrics(t *testing.T) {
 			client.Close()
 		})
 	}
+}
+
+// TestToKgoOpts_CustomPrometheusRegistry verifies a custom Prometheus registry can be configured.
+func TestToKgoOpts_CustomPrometheusRegistry(t *testing.T) {
+	t.Parallel()
+
+	// Create a custom registry
+	customRegistry := prometheus.NewRegistry()
+
+	publisher := &Publisher{
+		Brokers:              []string{"localhost:9092"},
+		PrometheusNamespace:  "test_kafka",
+		PrometheusSubsystem:  "producer",
+		PrometheusRegisterer: customRegistry,
+	}
+
+	opts := publisher.toKgoOpts()
+	require.NotEmpty(t, opts)
+
+	// Should be able to create a client with metrics hook using custom registry
+	client, err := kgo.NewClient(opts...)
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	defer client.Close()
+
+	// The custom registry is configured successfully if the client was created without error.
+	// Metrics are registered when kgo.NewClient is called, but they won't have data until
+	// there's actual Kafka activity (connections, produce, etc.)
 }
