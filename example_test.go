@@ -420,9 +420,11 @@ func Example_customPrometheusRegistry() {
 		},
 
 		// Configure Prometheus metrics with custom registry
-		PrometheusNamespace:  "my_app",
-		PrometheusSubsystem:  "kafka",
-		PrometheusRegisterer: customRegistry, // Use custom registry instead of default
+		Prometheus: wrpkafka.PrometheusConfig{
+			Namespace:  "my_app",
+			Subsystem:  "kafka",
+			Registerer: customRegistry, // Use custom registry instead of default
+		},
 	}
 
 	if err := publisher.Start(); err != nil {
@@ -435,4 +437,40 @@ func Example_customPrometheusRegistry() {
 
 	fmt.Println("Custom Prometheus registry configured")
 	// Output: Custom Prometheus registry configured
+}
+
+// This example shows how to enable optional Prometheus metrics including
+// record counts, batch counts, compressed bytes, Go runtime metrics, and client labels.
+func Example_prometheusOptionalMetrics() {
+	publisher := &wrpkafka.Publisher{
+		Brokers: []string{"localhost:9092"},
+		InitialDynamicConfig: wrpkafka.DynamicConfig{
+			TopicMap: []wrpkafka.TopicRoute{
+				{Pattern: "*", Topic: "events"},
+			},
+		},
+
+		// Configure Prometheus metrics with optional features
+		Prometheus: wrpkafka.PrometheusConfig{
+			Namespace:             "my_app",
+			Subsystem:             "kafka",
+			EnableRecordMetrics:   true, // Adds #{ns}_produce_records_total, #{ns}_fetch_records_total
+			EnableBatchMetrics:    true, // Adds #{ns}_produce_batches_total, #{ns}_fetch_batches_total
+			EnableCompressedBytes: true, // Adds #{ns}_produce_compressed_bytes_total, #{ns}_fetch_compressed_bytes_total
+			EnableGoCollectors:    true, // Adds Go runtime metrics (process, goroutines, memory)
+			WithClientLabel:       true, // Adds "client_id" label to all metrics
+		},
+	}
+
+	if err := publisher.Start(); err != nil {
+		log.Fatal(err)
+	}
+	defer publisher.Stop(context.Background())
+
+	// The producer now exports additional detailed metrics
+	// Default metrics (always enabled): connections, read/write bytes, buffered records/bytes
+	// Optional metrics (configured above): record counts, batch counts, compressed bytes, Go runtime
+
+	fmt.Println("Optional Prometheus metrics enabled")
+	// Output: Optional Prometheus metrics enabled
 }
