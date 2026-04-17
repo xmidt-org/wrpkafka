@@ -489,24 +489,30 @@ func TestToKgoOpts(t *testing.T) {
 		{
 			name: "prometheus metrics with namespace only",
 			publisher: &Publisher{
-				Brokers:             []string{"localhost:9092"},
-				PrometheusNamespace: "kafka_producer",
+				Brokers: []string{"localhost:9092"},
+				Prometheus: PrometheusConfig{
+					Namespace: "kafka_producer",
+				},
 			},
 		},
 		{
 			name: "prometheus metrics with namespace and subsystem",
 			publisher: &Publisher{
-				Brokers:             []string{"localhost:9092"},
-				PrometheusNamespace: "kafka_producer",
-				PrometheusSubsystem: "wrp",
+				Brokers: []string{"localhost:9092"},
+				Prometheus: PrometheusConfig{
+					Namespace: "kafka_producer",
+					Subsystem: "wrp",
+				},
 			},
 		},
 		{
 			name: "prometheus metrics disabled (empty namespace)",
 			publisher: &Publisher{
-				Brokers:             []string{"localhost:9092"},
-				PrometheusNamespace: "",
-				PrometheusSubsystem: "ignored",
+				Brokers: []string{"localhost:9092"},
+				Prometheus: PrometheusConfig{
+					Namespace: "",
+					Subsystem: "ignored",
+				},
 			},
 		},
 		{
@@ -591,9 +597,11 @@ func TestToKgoOpts_PrometheusMetrics(t *testing.T) {
 			t.Parallel()
 
 			publisher := &Publisher{
-				Brokers:             []string{"localhost:9092"},
-				PrometheusNamespace: tt.namespace,
-				PrometheusSubsystem: tt.subsystem,
+				Brokers: []string{"localhost:9092"},
+				Prometheus: PrometheusConfig{
+					Namespace: tt.namespace,
+					Subsystem: tt.subsystem,
+				},
 			}
 
 			opts := publisher.toKgoOpts()
@@ -616,10 +624,12 @@ func TestToKgoOpts_CustomPrometheusRegistry(t *testing.T) {
 	customRegistry := prometheus.NewRegistry()
 
 	publisher := &Publisher{
-		Brokers:              []string{"localhost:9092"},
-		PrometheusNamespace:  "test_kafka",
-		PrometheusSubsystem:  "producer",
-		PrometheusRegisterer: customRegistry,
+		Brokers: []string{"localhost:9092"},
+		Prometheus: PrometheusConfig{
+			Namespace:  "test_kafka",
+			Subsystem:  "producer",
+			Registerer: customRegistry,
+		},
 	}
 
 	opts := publisher.toKgoOpts()
@@ -634,4 +644,79 @@ func TestToKgoOpts_CustomPrometheusRegistry(t *testing.T) {
 	// The custom registry is configured successfully if the client was created without error.
 	// Metrics are registered when kgo.NewClient is called, but they won't have data until
 	// there's actual Kafka activity (connections, produce, etc.)
+}
+
+// TestToKgoOpts_PrometheusOptionalMetrics verifies optional Prometheus metrics can be configured.
+func TestToKgoOpts_PrometheusOptionalMetrics(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name                  string
+		enableRecordMetrics   bool
+		enableBatchMetrics    bool
+		enableCompressedBytes bool
+		enableGoCollectors    bool
+		withClientLabel       bool
+	}{
+		{
+			name:                "all optional metrics disabled",
+			enableRecordMetrics: false,
+			enableBatchMetrics:  false,
+		},
+		{
+			name:                "record metrics enabled",
+			enableRecordMetrics: true,
+		},
+		{
+			name:               "batch metrics enabled",
+			enableBatchMetrics: true,
+		},
+		{
+			name:                  "compressed bytes enabled",
+			enableCompressedBytes: true,
+		},
+		{
+			name:               "go collectors enabled",
+			enableGoCollectors: true,
+		},
+		{
+			name:            "client label enabled",
+			withClientLabel: true,
+		},
+		{
+			name:                  "all optional metrics enabled",
+			enableRecordMetrics:   true,
+			enableBatchMetrics:    true,
+			enableCompressedBytes: true,
+			enableGoCollectors:    true,
+			withClientLabel:       true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			publisher := &Publisher{
+				Brokers: []string{"localhost:9092"},
+				Prometheus: PrometheusConfig{
+					Namespace:             "test_kafka",
+					EnableRecordMetrics:   tt.enableRecordMetrics,
+					EnableBatchMetrics:    tt.enableBatchMetrics,
+					EnableCompressedBytes: tt.enableCompressedBytes,
+					EnableGoCollectors:    tt.enableGoCollectors,
+					WithClientLabel:       tt.withClientLabel,
+				},
+			}
+
+			opts := publisher.toKgoOpts()
+			require.NotEmpty(t, opts)
+
+			// Should be able to create a client with metrics hook and optional features
+			client, err := kgo.NewClient(opts...)
+			require.NoError(t, err)
+			require.NotNil(t, client)
+			client.Close()
+		})
+	}
 }

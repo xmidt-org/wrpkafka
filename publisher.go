@@ -51,6 +51,57 @@ func defaultClientFactory(opts ...kgo.Opt) (kafkaClient, error) {
 	return kgo.NewClient(opts...)
 }
 
+// PrometheusConfig configures Prometheus metrics for the franz-go producer.
+type PrometheusConfig struct {
+	// Namespace sets the namespace for Prometheus metrics exported by franz-go.
+	// If empty, Prometheus metrics are disabled.
+	// Optional. Default: "" (metrics disabled).
+	Namespace string
+
+	// Subsystem sets the subsystem for Prometheus metrics exported by franz-go.
+	// Only used when Namespace is set.
+	// Optional. Default: "" (no subsystem).
+	Subsystem string
+
+	// Registerer is a custom Prometheus registerer to use for metrics.
+	// If nil, the default Prometheus registry is used.
+	// Only used when Namespace is set.
+	// Optional. Default: nil (uses default registry).
+	Registerer interface {
+		Register(prometheus.Collector) error
+		MustRegister(...prometheus.Collector)
+		Unregister(prometheus.Collector) bool
+	}
+
+	// EnableRecordMetrics reports the number of records produced/fetched.
+	// Adds metrics: #{ns}_produce_records_total, #{ns}_fetch_records_total.
+	// Only used when Namespace is set.
+	// Optional. Default: false.
+	EnableRecordMetrics bool
+
+	// EnableBatchMetrics reports the number of batches produced/fetched.
+	// Adds metrics: #{ns}_produce_batches_total, #{ns}_fetch_batches_total.
+	// Only used when Namespace is set.
+	// Optional. Default: false.
+	EnableBatchMetrics bool
+
+	// EnableCompressedBytes reports compressed byte metrics in addition to uncompressed.
+	// Adds metrics: #{ns}_produce_compressed_bytes_total, #{ns}_fetch_compressed_bytes_total.
+	// Only used when Namespace is set.
+	// Optional. Default: false.
+	EnableCompressedBytes bool
+
+	// EnableGoCollectors adds Go runtime metrics (process, goroutines, memory, etc.).
+	// Only used when Namespace is set.
+	// Optional. Default: false.
+	EnableGoCollectors bool
+
+	// WithClientLabel adds a "client_id" label to all metrics.
+	// Only used when Namespace is set.
+	// Optional. Default: false.
+	WithClientLabel bool
+}
+
 // Publisher is the main type that publishes WRP messages to Kafka.
 //
 // Thread Safety: All methods are safe for concurrent use by multiple goroutines.
@@ -118,25 +169,10 @@ type Publisher struct {
 	// Optional.
 	InitialPublishEventListeners []func(*PublishEvent)
 
-	// PrometheusNamespace sets the namespace for Prometheus metrics exported by franz-go.
-	// If empty, Prometheus metrics are disabled.
-	// Optional. Default: "" (metrics disabled).
-	PrometheusNamespace string
-
-	// PrometheusSubsystem sets the subsystem for Prometheus metrics exported by franz-go.
-	// Only used when PrometheusNamespace is set.
-	// Optional. Default: "" (no subsystem).
-	PrometheusSubsystem string
-
-	// PrometheusRegisterer is a custom Prometheus registerer to use for metrics.
-	// If nil, the default Prometheus registry is used.
-	// Only used when PrometheusNamespace is set.
-	// Optional. Default: nil (uses default registry).
-	PrometheusRegisterer interface {
-		Register(prometheus.Collector) error
-		MustRegister(...prometheus.Collector)
-		Unregister(prometheus.Collector) bool
-	}
+	// Prometheus configures Prometheus metrics for the franz-go producer.
+	// Set Prometheus.Namespace to enable metrics collection.
+	// Optional. Default: empty struct (metrics disabled).
+	Prometheus PrometheusConfig
 
 	// DenyNilPartitionKey requires valid partition keys and fails publishing when the hash key
 	// cannot be extracted from the message (missing or empty).
@@ -656,15 +692,41 @@ func (p *Publisher) toKgoOpts() []kgo.Opt {
 	}
 
 	// Add Prometheus metrics if configured
-	if p.PrometheusNamespace != "" {
+	if p.Prometheus.Namespace != "" {
 		var metricsOpts []kprom.Opt
-		if p.PrometheusSubsystem != "" {
-			metricsOpts = append(metricsOpts, kprom.Subsystem(p.PrometheusSubsystem))
+		if p.Prometheus.Subsystem != "" {
+			metricsOpts = append(metricsOpts, kprom.Subsystem(p.Prometheus.Subsystem))
 		}
-		if p.PrometheusRegisterer != nil {
-			metricsOpts = append(metricsOpts, kprom.Registerer(p.PrometheusRegisterer))
+		if p.Prometheus.Registerer != nil {
+			metricsOpts = append(metricsOpts, kprom.Registerer(p.Prometheus.Registerer))
 		}
-		metrics := kprom.NewMetrics(p.PrometheusNamespace, metricsOpts...)
+
+		// Build metric details list (always include defaults: UncompressedBytes, ByTopic, ByNode)
+		details := []kprom.Detail{
+			kprom.UncompressedBytes,
+			kprom.ByTopic,
+			kprom.ByNode,
+		}
+		if p.Prometheus.EnableRecordMetrics {
+			details = append(details, kprom.Records)
+		}
+		if p.Prometheus.EnableBatchMetrics {
+			details = append(details, kprom.Batches)
+		}
+		if p.Prometheus.EnableCompressedBytes {
+			details = append(details, kprom.CompressedBytes)
+		}
+		metricsOpts = append(metricsOpts, kprom.FetchAndProduceDetail(details...))
+
+		// Add optional features
+		if p.Prometheus.WithClientLabel {
+			metricsOpts = append(metricsOpts, kprom.WithClientLabel())
+		}
+		if p.Prometheus.EnableGoCollectors {
+			metricsOpts = append(metricsOpts, kprom.GoCollectors())
+		}
+
+		metrics := kprom.NewMetrics(p.Prometheus.Namespace, metricsOpts...)
 		opts = append(opts, kgo.WithHooks(metrics))
 	}
 
