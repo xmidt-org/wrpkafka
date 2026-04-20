@@ -652,20 +652,14 @@ func TestToKgoOpts_PrometheusOptionalMetrics(t *testing.T) {
 
 	tests := []struct {
 		name                  string
-		enableRecordMetrics   bool
 		enableBatchMetrics    bool
 		enableCompressedBytes bool
 		enableGoCollectors    bool
 		withClientLabel       bool
 	}{
 		{
-			name:                "all optional metrics disabled",
-			enableRecordMetrics: false,
-			enableBatchMetrics:  false,
-		},
-		{
-			name:                "record metrics enabled",
-			enableRecordMetrics: true,
+			name:               "no optional metrics",
+			enableBatchMetrics: false,
 		},
 		{
 			name:               "batch metrics enabled",
@@ -685,7 +679,6 @@ func TestToKgoOpts_PrometheusOptionalMetrics(t *testing.T) {
 		},
 		{
 			name:                  "all optional metrics enabled",
-			enableRecordMetrics:   true,
 			enableBatchMetrics:    true,
 			enableCompressedBytes: true,
 			enableGoCollectors:    true,
@@ -701,7 +694,6 @@ func TestToKgoOpts_PrometheusOptionalMetrics(t *testing.T) {
 				Brokers: []string{"localhost:9092"},
 				Prometheus: PrometheusConfig{
 					Namespace:             "test_kafka",
-					EnableRecordMetrics:   tt.enableRecordMetrics,
 					EnableBatchMetrics:    tt.enableBatchMetrics,
 					EnableCompressedBytes: tt.enableCompressedBytes,
 					EnableGoCollectors:    tt.enableGoCollectors,
