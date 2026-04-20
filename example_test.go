@@ -440,7 +440,8 @@ func Example_customPrometheusRegistry() {
 }
 
 // This example shows how to enable optional Prometheus metrics including
-// record counts, batch counts, compressed bytes, Go runtime metrics, and client labels.
+// batch counts, compressed bytes, Go runtime metrics, and client labels.
+// Note: Record metrics are always enabled when Prometheus namespace is configured.
 func Example_prometheusOptionalMetrics() {
 	publisher := &wrpkafka.Publisher{
 		Brokers: []string{"localhost:9092"},
@@ -454,7 +455,6 @@ func Example_prometheusOptionalMetrics() {
 		Prometheus: wrpkafka.PrometheusConfig{
 			Namespace:             "my_app",
 			Subsystem:             "kafka",
-			EnableRecordMetrics:   true, // Adds #{ns}_produce_records_total, #{ns}_fetch_records_total
 			EnableBatchMetrics:    true, // Adds #{ns}_produce_batches_total, #{ns}_fetch_batches_total
 			EnableCompressedBytes: true, // Adds #{ns}_produce_compressed_bytes_total, #{ns}_fetch_compressed_bytes_total
 			EnableGoCollectors:    true, // Adds Go runtime metrics (process, goroutines, memory)
@@ -468,8 +468,8 @@ func Example_prometheusOptionalMetrics() {
 	defer publisher.Stop(context.Background())
 
 	// The producer now exports additional detailed metrics
-	// Default metrics (always enabled): connections, read/write bytes, buffered records/bytes
-	// Optional metrics (configured above): record counts, batch counts, compressed bytes, Go runtime
+	// Default metrics (always enabled): connections, read/write bytes, buffered records/bytes, record counts
+	// Optional metrics (configured above): batch counts, compressed bytes, Go runtime, client labels
 
 	fmt.Println("Optional Prometheus metrics enabled")
 	// Output: Optional Prometheus metrics enabled

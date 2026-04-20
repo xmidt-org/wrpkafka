@@ -73,12 +73,6 @@ type PrometheusConfig struct {
 		Unregister(prometheus.Collector) bool
 	}
 
-	// EnableRecordMetrics reports the number of records produced/fetched.
-	// Adds metrics: #{ns}_produce_records_total, #{ns}_fetch_records_total.
-	// Only used when Namespace is set.
-	// Optional. Default: false.
-	EnableRecordMetrics bool
-
 	// EnableBatchMetrics reports the number of batches produced/fetched.
 	// Adds metrics: #{ns}_produce_batches_total, #{ns}_fetch_batches_total.
 	// Only used when Namespace is set.
@@ -701,14 +695,12 @@ func (p *Publisher) toKgoOpts() []kgo.Opt {
 			metricsOpts = append(metricsOpts, kprom.Registerer(p.Prometheus.Registerer))
 		}
 
-		// Build metric details list (always include defaults: UncompressedBytes, ByTopic, ByNode)
+		// Build metric details list (always include defaults: UncompressedBytes, ByTopic, ByNode, Records)
 		details := []kprom.Detail{
 			kprom.UncompressedBytes,
 			kprom.ByTopic,
 			kprom.ByNode,
-		}
-		if p.Prometheus.EnableRecordMetrics {
-			details = append(details, kprom.Records)
+			kprom.Records,
 		}
 		if p.Prometheus.EnableBatchMetrics {
 			details = append(details, kprom.Batches)
