@@ -154,8 +154,8 @@ github.com/twmb/franz-go/pkg/kmsg v1.13.1 h1:fG5kItwysTk5UXqVwb64EpQEy3TydF3vYYK
 github.com/twmb/franz-go/pkg/kmsg v1.13.1/go.mod h1:+DPt4NC8RmI6hqb8G09+3giKObE6uD2Eya6CfqBpeJY=
 github.com/twmb/franz-go/plugin/kprom v1.4.0 h1:gRdB03h/BoBTIgr3obudwio6q3FbrFvbjk4LjO0DTgs=
 github.com/twmb/franz-go/plugin/kprom v1.4.0/go.mod h1:0j4hawUp3/R8tdn+uV0movy1HIaRbqsPPdMaeWNq0pc=
-github.com/xmidt-org/eventor v1.0.47 h1:9S38g19mLyj4Cve0XtqM0b9DOZ0isf5+q304KWJLdEg=
-github.com/xmidt-org/eventor v1.0.47/go.mod h1:hDYVga+QLP8ZfwIBtmDvXRtYbY2dPa6i0PNQrqtwYUg=
+github.com/xmidt-org/eventor v1.0.48 h1:JgCt7zuv0ctt7XEkZzJQZFWZyu7M1r4pHm1vTQBcmco=
+github.com/xmidt-org/eventor v1.0.48/go.mod h1:hDYVga+QLP8ZfwIBtmDvXRtYbY2dPa6i0PNQrqtwYUg=
 github.com/xmidt-org/wrp-go/v5 v5.4.2 h1:SyL4tphp6+eWCdcYMVrQgx7CZyZCBI0+DB2d6WqeD5M=
 github.com/xmidt-org/wrp-go/v5 v5.4.2/go.mod h1:7sr9aQlks68nZkRRnd7HMhe95vDscG4VAvilI6cHGhw=
 github.com/yusufpapurcu/wmi v1.2.4 h1:zFUKzehAFReQwLys1b/iSMl+JQGSCSjtVqQn9bBrPo0=
