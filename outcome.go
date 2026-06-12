@@ -31,19 +31,28 @@ const (
 	Failed
 )
 
+// Outcome string constants
+const (
+	outcomeAccepted  = "Accepted"
+	outcomeQueued    = "Queued"
+	outcomeAttempted = "Attempted"
+	outcomeDropped   = "Dropped"
+	outcomeFailed    = "Failed"
+)
+
 // String returns the string representation of the Outcome.
 func (o Outcome) String() string {
 	switch o {
 	case Accepted:
-		return "Accepted"
+		return outcomeAccepted
 	case Queued:
-		return "Queued"
+		return outcomeQueued
 	case Attempted:
-		return "Attempted"
+		return outcomeAttempted
 	case Dropped:
-		return "Dropped"
+		return outcomeDropped
 	case Failed:
-		return "Failed"
+		return outcomeFailed
 	default:
 		return "Unknown"
 	}

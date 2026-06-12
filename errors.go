@@ -5,34 +5,45 @@ package wrpkafka
 
 import "errors"
 
+// Error type constants for metrics
+const (
+	errorTypeEncoding   = "encoding_error"
+	errorTypeNoMatch    = "no_topic_match"
+	errorTypeBuffer     = "buffer_full"
+	errorTypeBroker     = "broker_error"
+	errorTypeTimeout    = "timeout"
+	errorTypeValidation = "validation_error"
+	errorTypeNotStarted = "not_started"
+)
+
 var (
 	// ErrEncoding indicates msgpack encoding failed.
 	ErrEncoding = &metricError{
-		metric:  "encoding_error",
+		metric:  errorTypeEncoding,
 		message: "encoding failed",
 	}
 
 	// ErrNoTopicMatch indicates no routing rule matched the event type.
 	ErrNoTopicMatch = &metricError{
-		metric:  "no_topic_match",
+		metric:  errorTypeNoMatch,
 		message: "no topic matched",
 	}
 
 	// ErrBufferFull indicates buffer capacity exceeded (QoS 0-24 only).
 	ErrBufferFull = &metricError{
-		metric:  "buffer_full",
+		metric:  errorTypeBuffer,
 		message: "buffer full",
 	}
 
 	// ErrBroker indicates Kafka broker rejected the message.
 	ErrBroker = &metricError{
-		metric:  "broker_error",
+		metric:  errorTypeBroker,
 		message: "broker error",
 	}
 
 	// ErrTimeout indicates request timeout exceeded.
 	ErrTimeout = &metricError{
-		metric:  "timeout",
+		metric:  errorTypeTimeout,
 		message: "timeout",
 	}
 
@@ -44,13 +55,13 @@ var (
 
 	// ErrValidation indicates configuration validation failed.
 	ErrValidation = &metricError{
-		metric:  "validation_error",
+		metric:  errorTypeValidation,
 		message: "validation error",
 	}
 
 	// ErrNotStarted indicates the publisher has not been started.
 	ErrNotStarted = &metricError{
-		metric:  "not_started",
+		metric:  errorTypeNotStarted,
 		message: "publisher not started",
 	}
 

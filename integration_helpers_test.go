@@ -49,12 +49,14 @@ func setupKafka(t *testing.T) (*kafka.KafkaContainer, string) {
 	configureTestContainersForPodman(t)
 
 	// Start Kafka container
-	// Using port-based wait strategy instead of log parsing for reliability
+	// Using only port-based wait strategy (no log parsing) for parallel test reliability
 	kafkaContainer, err := kafka.Run(ctx,
 		"confluentinc/confluent-local:7.8.0",
 		kafka.WithClusterID("test-cluster"),
-		testcontainers.WithWaitStrategy(
-			wait.ForListeningPort("9093/tcp").WithStartupTimeout(90*time.Second),
+		// Override default wait strategies with port-only check
+		testcontainers.WithWaitStrategyAndDeadline(
+			90*time.Second,
+			wait.ForListeningPort("9093/tcp"),
 		),
 	)
 	require.NoError(t, err, "Failed to start Kafka container")

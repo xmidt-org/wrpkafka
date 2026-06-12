@@ -18,29 +18,29 @@ func TestOutcome_String(t *testing.T) {
 		expected string
 	}{
 		{
-			name:     "Accepted",
+			name:     outcomeAccepted,
 			outcome:  Accepted,
-			expected: "Accepted",
+			expected: outcomeAccepted,
 		},
 		{
-			name:     "Queued",
+			name:     outcomeQueued,
 			outcome:  Queued,
-			expected: "Queued",
+			expected: outcomeQueued,
 		},
 		{
-			name:     "Attempted",
+			name:     outcomeAttempted,
 			outcome:  Attempted,
-			expected: "Attempted",
+			expected: outcomeAttempted,
 		},
 		{
-			name:     "Dropped",
+			name:     outcomeDropped,
 			outcome:  Dropped,
-			expected: "Dropped",
+			expected: outcomeDropped,
 		},
 		{
-			name:     "Failed",
+			name:     outcomeFailed,
 			outcome:  Failed,
-			expected: "Failed",
+			expected: outcomeFailed,
 		},
 		{
 			name:     "Unknown - invalid outcome value",

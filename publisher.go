@@ -138,11 +138,27 @@ type Publisher struct {
 	// Default: 0 (no timeout).
 	CleanupTimeout time.Duration
 
-	// MaxRetries controls retry behavior on broker failures.
+	// RecordDeliveryTimeout sets the maximum time a record can remain buffered
+	// before timing out. This timeout starts when the record is first buffered.
+	// When exceeded, the record fails and the error callback fires.
+	// Zero or negative values mean no timeout (records can buffer indefinitely).
+	// Default: 0 (no timeout).
+	RecordDeliveryTimeout time.Duration
+
+	// MaxRequestRetries controls retry behavior for individual broker requests.
+	// This applies to network-level request failures (timeouts, connection errors).
 	// <=0: No retries, fail immediately (default).
-	// >0: Retry up to this many times.
+	// >0: Retry each request up to this many times.
 	// Default: 0 (no retries, fail fast).
-	MaxRetries int
+	MaxRequestRetries int
+
+	// MaxRecordRetries controls retry behavior for record-level failures.
+	// This is the maximum number of times Produce() will retry sending a record
+	// (across multiple requests). When retries are exhausted, the error callback fires.
+	// <=0: Retry indefinitely until success, context cancellation, or client closure (default).
+	// >0: Retry up to this many times, then fail and trigger error callback.
+	// Default: 0 (unlimited retries - callbacks never fire with errors).
+	MaxRecordRetries int
 
 	// AllowAutoTopicCreation enables automatic topic creation when publishing to non-existent topics.
 	// Default: false (safer for production - prevents typos from creating topics).
@@ -384,31 +400,22 @@ func (p *Publisher) Produce(ctx context.Context, msg *wrp.Message) (Outcome, err
 
 		if qos <= 24 {
 			// Low QoS: Fire-and-forget with TryProduce
+			// Capture recordEvent in closure to avoid loop variable capture bug
+			evt := recordEvent
 			client.TryProduce(ctx, record, func(r *kgo.Record, err error) {
-				p.dispatchEvent(&recordEvent, startTime, err)
+				p.dispatchEvent(&evt, startTime, err)
 			})
 			returnOutcome = Attempted
 		} else if qos <= 74 {
 			// Medium QoS: Async with retry, block if buffer full
-			// Provide callback to capture async errors (retries exhausted, timeout, etc.)
+			// Callback dispatches event for both success and error cases
+			// Capture recordEvent in closure to avoid loop variable capture bug
+			evt := recordEvent
 			client.Produce(ctx, record, func(r *kgo.Record, err error) {
-				if err != nil {
-					// Async error occurred - dispatch error event
-					// Note: This runs in a different goroutine after the produce attempt
-					asyncEvent := PublishEvent{
-						EventType:          recordEvent.EventType,
-						Topic:              recordEvent.Topic,
-						TopicShardStrategy: recordEvent.TopicShardStrategy,
-						Error:              err,
-						ErrorType:          errorType(err),
-						Duration:           time.Since(startTime),
-					}
-					p.dispatchEvent(&asyncEvent, startTime, err)
-				}
+				// Dispatch event for both success and error
+				// Note: This runs in a different goroutine after the produce attempt
+				p.dispatchEvent(&evt, startTime, err)
 			})
-
-			// Optimistically dispatch success event (actual result delivered via callback)
-			p.dispatchEvent(&recordEvent, startTime, nil)
 			returnOutcome = Queued
 		} else {
 			// High QoS: Sync with confirmation
@@ -646,10 +653,22 @@ func (p *Publisher) toKgoOpts() []kgo.Opt {
 		opts = append(opts, kgo.RequestTimeoutOverhead(p.RequestTimeout))
 	}
 
-	// Add retry config (only if > 0)
-	// <=0 = no retries (fail fast), N = retry N times
-	if p.MaxRetries > 0 {
-		opts = append(opts, kgo.RequestRetries(p.MaxRetries))
+	// Add record delivery timeout (only if > 0)
+	// Controls how long a record can remain buffered before timing out
+	if p.RecordDeliveryTimeout > 0 {
+		opts = append(opts, kgo.RecordDeliveryTimeout(p.RecordDeliveryTimeout))
+	}
+
+	// Add request retry config (only if > 0)
+	// <=0 = no retries (fail fast), N = retry N times per request
+	if p.MaxRequestRetries > 0 {
+		opts = append(opts, kgo.RequestRetries(p.MaxRequestRetries))
+	}
+
+	// Add record retry config (only if > 0)
+	// <=0 = unlimited retries (default), N = retry up to N times then fail
+	if p.MaxRecordRetries > 0 {
+		opts = append(opts, kgo.RecordRetries(p.MaxRecordRetries))
 	}
 
 	// Add linger time

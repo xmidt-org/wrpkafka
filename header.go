@@ -10,6 +10,25 @@ import (
 	"github.com/xmidt-org/wrp-go/v5"
 )
 
+// Field name constants for WRP message fields
+const (
+	fieldType                    = "Type"
+	fieldSource                  = "Source"
+	fieldDestination             = "Destination"
+	fieldTransactionUUID         = "TransactionUUID"
+	fieldContentType             = "ContentType"
+	fieldAccept                  = "Accept"
+	fieldStatus                  = "Status"
+	fieldRequestDeliveryResponse = "RequestDeliveryResponse"
+	fieldHeaders                 = "Headers"
+	fieldPath                    = "Path"
+	fieldServiceName             = "ServiceName"
+	fieldURL                     = "URL"
+	fieldPartnerIDs              = "PartnerIDs"
+	fieldSessionID               = "SessionID"
+	fieldQualityOfService        = "QualityOfService"
+)
+
 // extractWRPField extracts field values from a WRP message for use in Kafka record headers.
 // Supports three categories of field extraction:
 //
@@ -90,9 +109,9 @@ func extractWRPField(msg *wrp.Message, fieldName string) []string {
 //   - "Status" (when nil) → nil (but returns true for "ok" flag)
 func extractStandardFields(msg *wrp.Message, fieldName string) ([]string, bool) {
 	switch fieldName {
-	case "Type":
+	case fieldType:
 		return []string{msg.Type.String()}, true
-	case "Source":
+	case fieldSource:
 		return []string{msg.Source}, true
 	case "DeviceID":
 		deviceID, err := wrp.ParseDeviceID(msg.Source)
@@ -100,37 +119,37 @@ func extractStandardFields(msg *wrp.Message, fieldName string) ([]string, bool) 
 			return nil, true
 		}
 		return []string{deviceID.ID()}, true
-	case "Destination":
+	case fieldDestination:
 		return []string{msg.Destination}, true
-	case "TransactionUUID":
+	case fieldTransactionUUID:
 		return []string{msg.TransactionUUID}, true
-	case "ContentType":
+	case fieldContentType:
 		return []string{msg.ContentType}, true
-	case "Accept":
+	case fieldAccept:
 		return []string{msg.Accept}, true
-	case "Status":
+	case fieldStatus:
 		if msg.Status != nil {
 			return []string{strconv.FormatInt(*msg.Status, 10)}, true
 		}
 		return nil, true
-	case "RequestDeliveryResponse":
+	case fieldRequestDeliveryResponse:
 		if msg.RequestDeliveryResponse != nil {
 			return []string{strconv.FormatInt(*msg.RequestDeliveryResponse, 10)}, true
 		}
 		return nil, true
-	case "Headers":
+	case fieldHeaders:
 		return msg.Headers, true
-	case "Path":
+	case fieldPath:
 		return []string{msg.Path}, true
-	case "ServiceName":
+	case fieldServiceName:
 		return []string{msg.ServiceName}, true
-	case "URL":
+	case fieldURL:
 		return []string{msg.URL}, true
-	case "PartnerIDs":
+	case fieldPartnerIDs:
 		return msg.PartnerIDs, true
-	case "SessionID":
+	case fieldSessionID:
 		return []string{msg.SessionID}, true
-	case "QualityOfService":
+	case fieldQualityOfService:
 		return []string{strconv.Itoa(int(msg.QualityOfService))}, true
 	}
 
@@ -232,22 +251,22 @@ func extractMetadataFields(msg *wrp.Message, fieldName string) ([]string, bool) 
 // validWRPFieldNames contains all valid WRP field names for header extraction.
 // This is used for validation to catch typos and invalid field references early.
 var validWRPFieldNames = map[string]struct{}{
-	"Type":                    {},
-	"Source":                  {},
-	"DeviceID":                {},
-	"Destination":             {},
-	"TransactionUUID":         {},
-	"ContentType":             {},
-	"Accept":                  {},
-	"Status":                  {},
-	"RequestDeliveryResponse": {},
-	"Headers":                 {},
-	"Path":                    {},
-	"ServiceName":             {},
-	"URL":                     {},
-	"PartnerIDs":              {},
-	"SessionID":               {},
-	"QualityOfService":        {},
+	fieldType:                    {},
+	fieldSource:                  {},
+	"DeviceID":                   {},
+	fieldDestination:             {},
+	fieldTransactionUUID:         {},
+	fieldContentType:             {},
+	fieldAccept:                  {},
+	fieldStatus:                  {},
+	fieldRequestDeliveryResponse: {},
+	fieldHeaders:                 {},
+	fieldPath:                    {},
+	fieldServiceName:             {},
+	fieldURL:                     {},
+	fieldPartnerIDs:              {},
+	fieldSessionID:               {},
+	fieldQualityOfService:        {},
 }
 
 // isValidWRPFieldReference validates a wrp.* header field reference.

@@ -59,7 +59,7 @@ func TestErrors(t *testing.T) {
 			err      error
 			expected string
 		}{
-			{"encoding error", ErrEncoding, "encoding_error"},
+			{"encoding error", ErrEncoding, errorTypeEncoding},
 			{"no topic match", ErrNoTopicMatch, "no_topic_match"},
 			{"buffer full", ErrBufferFull, "buffer_full"},
 			{"broker error", ErrBroker, "broker_error"},
@@ -68,7 +68,7 @@ func TestErrors(t *testing.T) {
 			{"not started", ErrNotStarted, "not_started"},
 			{"nil error", nil, ""},
 			{"unknown error", fmt.Errorf("random"), "unknown"},
-			{"wrapped encoding", errors.Join(ErrEncoding, fmt.Errorf("test")), "encoding_error"},
+			{"wrapped encoding", errors.Join(ErrEncoding, fmt.Errorf("test")), errorTypeEncoding},
 		}
 
 		for _, tt := range tests {
