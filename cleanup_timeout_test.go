@@ -12,6 +12,8 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
+const testBrokerCleanup = "localhost:9092"
+
 // captureFlushClient captures the context passed to Flush for testing.
 type captureFlushClient struct {
 	capturedCtx *context.Context
@@ -88,7 +90,7 @@ func TestStop_CleanupTimeoutRespectsCaller(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			p := &Publisher{}
-			p.Brokers = []string{"localhost:9092"}
+			p.Brokers = []string{testBrokerCleanup}
 			p.CleanupTimeout = tt.cleanupTimeout
 			p.InitialDynamicConfig = DynamicConfig{
 				TopicMap: []TopicRoute{{Pattern: "*", Topic: "test"}},

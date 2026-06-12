@@ -63,11 +63,13 @@ func ExamplePublisher() {
 		MaxBufferedBytes:   10 * 1024 * 1024, // 10 MB
 
 		// Timeouts (optional - 0 means no timeout)
-		RequestTimeout: 30 * 1000000000, // 30 seconds (time.Duration)
-		CleanupTimeout: 5 * 1000000000,  // 5 seconds
+		RequestTimeout:        30 * 1000000000, // 30 seconds (time.Duration)
+		RecordDeliveryTimeout: 60 * 1000000000, // 60 seconds - max time record can remain buffered
+		CleanupTimeout:        5 * 1000000000,  // 5 seconds
 
-		// Retry behavior (optional - 0 means fail fast)
-		MaxRetries: 3,
+		// Retry behavior (optional)
+		MaxRequestRetries: 3, // Retry individual requests up to 3 times
+		MaxRecordRetries:  3, // Retry records up to 3 times (0 = unlimited)
 
 		// Topic routing configuration
 		InitialDynamicConfig: wrpkafka.DynamicConfig{

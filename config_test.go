@@ -481,9 +481,10 @@ func TestToKgoOpts(t *testing.T) {
 		{
 			name: "timeouts and retries",
 			publisher: &Publisher{
-				Brokers:        []string{"localhost:9092"},
-				RequestTimeout: 30 * time.Second,
-				MaxRetries:     5,
+				Brokers:           []string{"localhost:9092"},
+				RequestTimeout:    30 * time.Second,
+				MaxRequestRetries: 5,
+				MaxRecordRetries:  5,
 			},
 		},
 		{
@@ -534,7 +535,8 @@ func TestToKgoOpts(t *testing.T) {
 				MaxBufferedRecords:     1000,
 				MaxBufferedBytes:       1024 * 1024,
 				RequestTimeout:         30 * time.Second,
-				MaxRetries:             5,
+				MaxRequestRetries:      5,
+				MaxRecordRetries:       5,
 				AllowAutoTopicCreation: true,
 			},
 		},
@@ -558,7 +560,8 @@ func TestToKgoOpts_CreatesValidClient(t *testing.T) {
 		Brokers:            []string{"localhost:9092"},
 		MaxBufferedRecords: 1000,
 		RequestTimeout:     30 * time.Second,
-		MaxRetries:         5,
+		MaxRequestRetries:  5,
+		MaxRecordRetries:   5,
 	}
 
 	opts := publisher.toKgoOpts()
