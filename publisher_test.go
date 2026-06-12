@@ -815,8 +815,8 @@ func TestProduceAsyncErrors(t *testing.T) {
 			simulatedError:        errors.New("retries exhausted"),
 			expectedResult:        Queued,
 			expectedError:         "",
-			expectedEventCalls:    2, // 1 success + 1 async error
-			expectedSuccessEvents: 1,
+			expectedEventCalls:    1, // 1 async error only
+			expectedSuccessEvents: 0,
 			expectedErrorEvents:   1,
 		},
 		{
@@ -833,8 +833,8 @@ func TestProduceAsyncErrors(t *testing.T) {
 			simulatedError:        context.DeadlineExceeded,
 			expectedResult:        Queued,
 			expectedError:         "",
-			expectedEventCalls:    2, // 1 success + 1 async error
-			expectedSuccessEvents: 1,
+			expectedEventCalls:    1, // 1 async error only
+			expectedSuccessEvents: 0,
 			expectedErrorEvents:   1,
 		},
 		{
