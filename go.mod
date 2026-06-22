@@ -10,7 +10,7 @@ require (
 	github.com/twmb/franz-go v1.21.3
 	github.com/twmb/franz-go/plugin/kprom v1.4.0
 	github.com/xmidt-org/eventor v1.0.49
-	github.com/xmidt-org/wrp-go/v5 v5.4.2
+	github.com/xmidt-org/wrp-go/v5 v5.4.3
 )
 
 require (
