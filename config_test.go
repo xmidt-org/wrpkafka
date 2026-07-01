@@ -744,7 +744,7 @@ func TestToKgoOpts_DynamicConfig_BatchMaxBytes(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		batchMaxBytes int
+		batchMaxBytes int32
 	}{
 		{
 			name:          "batch max bytes 512KB",
