@@ -676,6 +676,11 @@ func (p *Publisher) toKgoOpts() []kgo.Opt {
 		opts = append(opts, kgo.ProducerLinger(dynCfg.Linger))
 	}
 
+	// Add producer batch max bytes
+	if dynCfg != nil && dynCfg.BatchMaxBytes > 0 {
+		opts = append(opts, kgo.ProducerBatchMaxBytes(int32(dynCfg.BatchMaxBytes)))
+	}
+
 	// Add acks requirement
 	if dynCfg != nil {
 		switch dynCfg.Acks {

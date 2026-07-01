@@ -32,6 +32,12 @@ type DynamicConfig struct {
 	// Zero or negative values disable lingering.
 	Linger time.Duration
 
+	// BatchMaxBytes sets the maximum size in bytes of a producer batch.
+	// Controls how much data can be sent in a single batch to Kafka.
+	// Zero or negative values use franz-go's default (1 MB).
+	// Optional. Default: 0 (use franz-go default).
+	BatchMaxBytes int
+
 	// Acks controls broker acknowledgments.
 	// Valid: "all", "leader", "none".
 	Acks Acks

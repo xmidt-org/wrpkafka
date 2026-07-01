@@ -383,6 +383,7 @@ func TestDynamicConfigValidation(t *testing.T) {
 				CompressionCodec: CompressionZstd,
 				Acks:             AcksAll,
 				Linger:           100 * time.Millisecond,
+				BatchMaxBytes:    2 * 1024 * 1024, // 2 MB
 				Headers: map[string][]string{
 					"service": {"test"},
 				},
@@ -521,6 +522,27 @@ func TestToKgoOpts(t *testing.T) {
 			publisher: &Publisher{
 				Brokers:             []string{"localhost:9092"},
 				DenyNilPartitionKey: true,
+			},
+		},
+		{
+			name: "dynamic config with batch max bytes",
+			publisher: &Publisher{
+				Brokers: []string{"localhost:9092"},
+				InitialDynamicConfig: DynamicConfig{
+					TopicMap:      []TopicRoute{{Pattern: "*", Topic: "events"}},
+					BatchMaxBytes: 512 * 1024, // 512 KB
+				},
+			},
+		},
+		{
+			name: "dynamic config with linger and batch max bytes",
+			publisher: &Publisher{
+				Brokers: []string{"localhost:9092"},
+				InitialDynamicConfig: DynamicConfig{
+					TopicMap:      []TopicRoute{{Pattern: "*", Topic: "events"}},
+					Linger:        50 * time.Millisecond,
+					BatchMaxBytes: 1024 * 1024, // 1 MB
+				},
 			},
 		},
 		{
@@ -714,4 +736,90 @@ func TestToKgoOpts_PrometheusOptionalMetrics(t *testing.T) {
 			client.Close()
 		})
 	}
+}
+
+// TestToKgoOpts_DynamicConfig_BatchMaxBytes verifies BatchMaxBytes configuration.
+func TestToKgoOpts_DynamicConfig_BatchMaxBytes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		batchMaxBytes int
+	}{
+		{
+			name:          "batch max bytes 512KB",
+			batchMaxBytes: 512 * 1024,
+		},
+		{
+			name:          "batch max bytes 1MB",
+			batchMaxBytes: 1024 * 1024,
+		},
+		{
+			name:          "batch max bytes 2MB",
+			batchMaxBytes: 2 * 1024 * 1024,
+		},
+		{
+			name:          "batch max bytes zero (use default)",
+			batchMaxBytes: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			publisher := &Publisher{
+				Brokers: []string{"localhost:9092"},
+				InitialDynamicConfig: DynamicConfig{
+					TopicMap:      []TopicRoute{{Pattern: "*", Topic: "events"}},
+					BatchMaxBytes: tt.batchMaxBytes,
+				},
+			}
+
+			// Initialize dynamic config
+			err := publisher.UpdateConfig(publisher.InitialDynamicConfig)
+			require.NoError(t, err)
+
+			opts := publisher.toKgoOpts()
+			require.NotEmpty(t, opts)
+
+			// Should be able to create a client with BatchMaxBytes configured
+			client, err := kgo.NewClient(opts...)
+			require.NoError(t, err)
+			require.NotNil(t, client)
+			client.Close()
+		})
+	}
+}
+
+// TestToKgoOpts_DynamicConfig_Combined verifies combined dynamic config options.
+func TestToKgoOpts_DynamicConfig_Combined(t *testing.T) {
+	t.Parallel()
+
+	publisher := &Publisher{
+		Brokers: []string{"localhost:9092"},
+		InitialDynamicConfig: DynamicConfig{
+			TopicMap:         []TopicRoute{{Pattern: "*", Topic: "events"}},
+			CompressionCodec: CompressionSnappy,
+			Acks:             AcksAll,
+			Linger:           50 * time.Millisecond,
+			BatchMaxBytes:    1024 * 1024, // 1 MB
+			Headers: map[string][]string{
+				"source": {"test"},
+			},
+		},
+	}
+
+	// Initialize dynamic config
+	err := publisher.UpdateConfig(publisher.InitialDynamicConfig)
+	require.NoError(t, err)
+
+	opts := publisher.toKgoOpts()
+	require.NotEmpty(t, opts)
+
+	// Should be able to create a client with all dynamic config options
+	client, err := kgo.NewClient(opts...)
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	client.Close()
 }
