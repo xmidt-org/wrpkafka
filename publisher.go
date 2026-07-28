@@ -299,6 +299,16 @@ func (p *Publisher) Start() error {
 		return fmt.Errorf("failed to create Kafka client: %w", err)
 	}
 
+	// Validate broker connectivity
+	// Use a short timeout context for the ping
+	pingCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := client.Ping(pingCtx); err != nil {
+		client.Close()
+		return fmt.Errorf("failed to connect to Kafka brokers: %w", err)
+	}
+
 	p.client = client
 	p.logger.Log(kgo.LogLevelInfo, "Publisher started successfully")
 
@@ -351,15 +361,16 @@ func (p *Publisher) Stop(ctx context.Context) {
 //   - Outcome: What happened (Accepted, Queued, Attempted, Failed)
 //   - error: Non-nil only for QoS 75-99 synchronous failures and pre-flight errors
 func (p *Publisher) Produce(ctx context.Context, msg *wrp.Message) (Outcome, error) {
-	if ctx.Err() != nil {
-		return Failed, ctx.Err()
-	}
-
 	startTime := time.Now()
 
 	// Initialize event with what we know early
 	event := PublishEvent{
 		EventType: eventType(msg),
+	}
+
+	if ctx.Err() != nil {
+		p.dispatchEvent(&event, startTime, ctx.Err())
+		return Failed, ctx.Err()
 	}
 
 	// Get client reference while holding lock (brief hold)
@@ -400,12 +411,28 @@ func (p *Publisher) Produce(ctx context.Context, msg *wrp.Message) (Outcome, err
 
 		if qos <= 24 {
 			// Low QoS: Fire-and-forget with TryProduce
-			// Capture recordEvent in closure to avoid loop variable capture bug
-			evt := recordEvent
-			client.TryProduce(ctx, record, func(r *kgo.Record, err error) {
-				p.dispatchEvent(&evt, startTime, err)
-			})
-			returnOutcome = Attempted
+			// TryProduce silently drops messages when buffer is full WITHOUT calling the callback.
+			// Check buffer capacity first and dispatch Dropped event if full.
+			bufferFull := false
+			if p.MaxBufferedRecords > 0 && client.BufferedProduceRecords() >= int64(p.MaxBufferedRecords) {
+				bufferFull = true
+			} else if p.MaxBufferedBytes > 0 && client.BufferedProduceBytes() >= int64(p.MaxBufferedBytes) {
+				bufferFull = true
+			}
+
+			if bufferFull {
+				// Buffer is full - message will be dropped
+				p.dispatchEvent(&recordEvent, startTime, ErrBufferFull)
+				returnOutcome = Dropped
+			} else {
+				// Buffer has space - attempt to produce
+				// Capture recordEvent in closure to avoid loop variable capture bug
+				evt := recordEvent
+				client.TryProduce(ctx, record, func(r *kgo.Record, err error) {
+					p.dispatchEvent(&evt, startTime, err)
+				})
+				returnOutcome = Attempted
+			}
 		} else if qos <= 74 {
 			// Medium QoS: Async with retry, block if buffer full
 			// Callback dispatches event for both success and error cases

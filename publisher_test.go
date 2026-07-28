@@ -57,6 +57,32 @@ func TestPublisherLifecycle(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("start fails if broker connectivity check fails", func(t *testing.T) {
+		t.Parallel()
+		p := &Publisher{
+			Brokers: []string{"localhost:9092"},
+			InitialDynamicConfig: DynamicConfig{
+				TopicMap: []TopicRoute{{Pattern: "*", Topic: "t"}},
+			},
+		}
+
+		// Mock client that fails Ping
+		mockClient := &mockKafkaClient{}
+		mockClient.On("Ping", mock.Anything).Return(errors.New("connection refused"))
+		mockClient.On("Close").Return()
+
+		p.clientFactory = func(opts ...kgo.Opt) (kafkaClient, error) {
+			return mockClient, nil
+		}
+
+		err := p.Start()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to connect to Kafka brokers")
+
+		// Verify client was closed after ping failure
+		mockClient.AssertCalled(t, "Close")
+	})
+
 	t.Run("stop flushes and closes client", func(t *testing.T) {
 		t.Parallel()
 		mockClient := &mockKafkaClient{}
@@ -337,6 +363,7 @@ func TestEventListeners(t *testing.T) {
 
 		// Set mock client factory
 		mockClient := &mockKafkaClient{}
+		mockClient.On("Ping", mock.Anything).Return(nil)
 		mockClient.On("TryProduce", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 			cb := args.Get(2).(func(*kgo.Record, error))
 			cb(args.Get(1).(*kgo.Record), nil)
@@ -452,25 +479,95 @@ func TestConfigConcurrency(t *testing.T) {
 func TestProduceContextCancellation(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately
+	t.Run("canceled context dispatches event", func(t *testing.T) {
+		t.Parallel()
 
-	p := newTestPublisher(DynamicConfig{
-		TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+		ctx, cancelCtx := context.WithCancel(context.Background())
+		cancelCtx() // Cancel immediately
+
+		p := newTestPublisher(DynamicConfig{
+			TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+		})
+
+		// Setup event listener to verify event is dispatched
+		var eventMu sync.Mutex
+		var capturedEvents []PublishEvent
+
+		eventListener := func(event *PublishEvent) {
+			eventMu.Lock()
+			defer eventMu.Unlock()
+			capturedEvents = append(capturedEvents, *event)
+		}
+		removeListener := p.AddPublishEventListener(eventListener)
+		defer removeListener()
+
+		msg := &wrp.Message{
+			Type:             wrp.SimpleEventMessageType,
+			Metadata:         map[string]string{DefaultMetadataKeyField: "mac:112233445566"},
+			Destination:      "event:test",
+			QualityOfService: 50,
+		}
+
+		result, err := p.Produce(ctx, msg)
+
+		// Verify result
+		assert.Equal(t, Failed, result)
+		assert.Error(t, err)
+		assert.Equal(t, context.Canceled, err)
+
+		// Verify event was dispatched
+		eventMu.Lock()
+		defer eventMu.Unlock()
+		assert.Len(t, capturedEvents, 1, "Expected 1 event for context cancellation")
+		assert.Equal(t, context.Canceled, capturedEvents[0].Error)
+		assert.NotEmpty(t, capturedEvents[0].ErrorType)
+		assert.True(t, capturedEvents[0].Duration > 0)
 	})
 
-	msg := &wrp.Message{
-		Type:             wrp.SimpleEventMessageType,
-		Metadata:         map[string]string{DefaultMetadataKeyField: "mac:112233445566"},
-		Destination:      "event:test",
-		QualityOfService: 50,
-	}
+	t.Run("deadline exceeded context dispatches event", func(t *testing.T) {
+		t.Parallel()
 
-	result, err := p.Produce(ctx, msg)
+		ctx, cancelCtx := context.WithDeadline(context.Background(), time.Now().Add(-1*time.Second))
+		defer cancelCtx()
 
-	assert.Equal(t, Failed, result)
-	assert.Error(t, err)
-	assert.Equal(t, context.Canceled, err)
+		p := newTestPublisher(DynamicConfig{
+			TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+		})
+
+		// Setup event listener
+		var eventMu sync.Mutex
+		var capturedEvents []PublishEvent
+
+		eventListener := func(event *PublishEvent) {
+			eventMu.Lock()
+			defer eventMu.Unlock()
+			capturedEvents = append(capturedEvents, *event)
+		}
+		removeListener := p.AddPublishEventListener(eventListener)
+		defer removeListener()
+
+		msg := &wrp.Message{
+			Type:             wrp.SimpleEventMessageType,
+			Metadata:         map[string]string{DefaultMetadataKeyField: "mac:112233445566"},
+			Destination:      "event:test",
+			QualityOfService: 50,
+		}
+
+		result, err := p.Produce(ctx, msg)
+
+		// Verify result
+		assert.Equal(t, Failed, result)
+		assert.Error(t, err)
+		assert.Equal(t, context.DeadlineExceeded, err)
+
+		// Verify event was dispatched
+		eventMu.Lock()
+		defer eventMu.Unlock()
+		assert.Len(t, capturedEvents, 1, "Expected 1 event for deadline exceeded")
+		assert.Equal(t, context.DeadlineExceeded, capturedEvents[0].Error)
+		assert.NotEmpty(t, capturedEvents[0].ErrorType)
+		assert.True(t, capturedEvents[0].Duration > 0)
+	})
 }
 
 // TestProduceNotStarted tests behavior when client is not started
@@ -955,4 +1052,227 @@ func TestProduceAsyncErrors(t *testing.T) {
 			mockClient.AssertExpectations(t)
 		})
 	}
+}
+
+// TestProduceBufferFull tests buffer full detection for QoS 0-24
+func TestProduceBufferFull(t *testing.T) {
+	t.Parallel()
+
+	t.Run("buffer full by record count dispatches Dropped event", func(t *testing.T) {
+		t.Parallel()
+
+		mockClient := &mockKafkaClient{}
+		// Simulate buffer at capacity
+		mockClient.On("BufferedProduceRecords").Return(int64(100))
+		mockClient.On("BufferedProduceBytes").Return(int64(0))
+		// TryProduce should NOT be called since buffer is full
+		// mockClient.On("TryProduce", ...) - intentionally not mocked
+
+		p := newTestPublisher(DynamicConfig{
+			TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+		})
+		p.MaxBufferedRecords = 100 // Buffer is at max (100/100)
+		p.MaxBufferedBytes = 0     // Disabled
+		p.clientMu.Lock()
+		p.client = mockClient
+		p.clientMu.Unlock()
+
+		// Setup event listener
+		var eventMu sync.Mutex
+		var capturedEvents []PublishEvent
+
+		eventListener := func(event *PublishEvent) {
+			eventMu.Lock()
+			defer eventMu.Unlock()
+			capturedEvents = append(capturedEvents, *event)
+		}
+		cancel := p.AddPublishEventListener(eventListener)
+		defer cancel()
+
+		msg := &wrp.Message{
+			Type:             wrp.SimpleEventMessageType,
+			Metadata:         map[string]string{DefaultMetadataKeyField: "mac:112233445566"},
+			Destination:      "event:test",
+			QualityOfService: 10, // Low QoS - uses TryProduce
+		}
+
+		result, err := p.Produce(context.Background(), msg)
+
+		// Verify result
+		assert.Equal(t, Dropped, result)
+		assert.NoError(t, err, "Dropped should not return error")
+
+		// Verify event was dispatched
+		eventMu.Lock()
+		defer eventMu.Unlock()
+		assert.Len(t, capturedEvents, 1, "Expected 1 event for buffer full")
+		assert.ErrorIs(t, capturedEvents[0].Error, ErrBufferFull)
+		assert.Equal(t, errorTypeBuffer, capturedEvents[0].ErrorType)
+		assert.Equal(t, "topic1", capturedEvents[0].Topic)
+		assert.True(t, capturedEvents[0].Duration > 0)
+
+		// Verify TryProduce was NOT called (buffer check prevented it)
+		mockClient.AssertNotCalled(t, "TryProduce")
+	})
+
+	t.Run("buffer full by bytes dispatches Dropped event", func(t *testing.T) {
+		t.Parallel()
+
+		mockClient := &mockKafkaClient{}
+		// Simulate buffer at capacity by bytes
+		mockClient.On("BufferedProduceRecords").Return(int64(50))
+		mockClient.On("BufferedProduceBytes").Return(int64(1000000))
+
+		p := newTestPublisher(DynamicConfig{
+			TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+		})
+		p.MaxBufferedRecords = 0     // Disabled
+		p.MaxBufferedBytes = 1000000 // Buffer is at max (1MB/1MB)
+		p.clientMu.Lock()
+		p.client = mockClient
+		p.clientMu.Unlock()
+
+		// Setup event listener
+		var eventMu sync.Mutex
+		var capturedEvents []PublishEvent
+
+		eventListener := func(event *PublishEvent) {
+			eventMu.Lock()
+			defer eventMu.Unlock()
+			capturedEvents = append(capturedEvents, *event)
+		}
+		cancel := p.AddPublishEventListener(eventListener)
+		defer cancel()
+
+		msg := &wrp.Message{
+			Type:             wrp.SimpleEventMessageType,
+			Metadata:         map[string]string{DefaultMetadataKeyField: "mac:112233445566"},
+			Destination:      "event:test",
+			QualityOfService: 24, // Boundary of low QoS
+		}
+
+		result, err := p.Produce(context.Background(), msg)
+
+		// Verify result
+		assert.Equal(t, Dropped, result)
+		assert.NoError(t, err)
+
+		// Verify event was dispatched
+		eventMu.Lock()
+		defer eventMu.Unlock()
+		assert.Len(t, capturedEvents, 1, "Expected 1 event for buffer full")
+		assert.ErrorIs(t, capturedEvents[0].Error, ErrBufferFull)
+		assert.Equal(t, errorTypeBuffer, capturedEvents[0].ErrorType)
+
+		// Verify TryProduce was NOT called
+		mockClient.AssertNotCalled(t, "TryProduce")
+	})
+
+	t.Run("buffer has space for QoS 0-24 calls TryProduce", func(t *testing.T) {
+		t.Parallel()
+
+		mockClient := &mockKafkaClient{}
+		// Simulate buffer with available space
+		mockClient.On("BufferedProduceRecords").Return(int64(50))
+		mockClient.On("BufferedProduceBytes").Return(int64(500000))
+		// TryProduce should be called
+		mockClient.On("TryProduce", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+			cb := args.Get(2).(func(*kgo.Record, error))
+			cb(args.Get(1).(*kgo.Record), nil) // success
+		})
+
+		p := newTestPublisher(DynamicConfig{
+			TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+		})
+		p.MaxBufferedRecords = 100   // 50/100 - has space
+		p.MaxBufferedBytes = 1000000 // 500k/1MB - has space
+		p.clientMu.Lock()
+		p.client = mockClient
+		p.clientMu.Unlock()
+
+		// Setup event listener
+		var eventMu sync.Mutex
+		var capturedEvents []PublishEvent
+
+		eventListener := func(event *PublishEvent) {
+			eventMu.Lock()
+			defer eventMu.Unlock()
+			capturedEvents = append(capturedEvents, *event)
+		}
+		cancel := p.AddPublishEventListener(eventListener)
+		defer cancel()
+
+		msg := &wrp.Message{
+			Type:             wrp.SimpleEventMessageType,
+			Metadata:         map[string]string{DefaultMetadataKeyField: "mac:112233445566"},
+			Destination:      "event:test",
+			QualityOfService: 10,
+		}
+
+		result, err := p.Produce(context.Background(), msg)
+
+		// Verify result
+		assert.Equal(t, Attempted, result)
+		assert.NoError(t, err)
+
+		// Wait for async callback
+		assert.Eventually(t, func() bool {
+			eventMu.Lock()
+			defer eventMu.Unlock()
+			return len(capturedEvents) == 1
+		}, time.Second, 10*time.Millisecond)
+
+		// Verify TryProduce WAS called
+		mockClient.AssertCalled(t, "TryProduce", mock.Anything, mock.Anything, mock.Anything)
+
+		// Verify success event
+		eventMu.Lock()
+		defer eventMu.Unlock()
+		assert.Len(t, capturedEvents, 1)
+		assert.NoError(t, capturedEvents[0].Error)
+		assert.Empty(t, capturedEvents[0].ErrorType)
+	})
+
+	t.Run("QoS 25+ ignores buffer limits and uses Produce", func(t *testing.T) {
+		t.Parallel()
+
+		mockClient := &mockKafkaClient{}
+		// Buffer appears full, but QoS 25+ should ignore this check
+		mockClient.On("BufferedProduceRecords").Return(int64(100))
+		mockClient.On("BufferedProduceBytes").Return(int64(0))
+		// Produce (not TryProduce) should be called
+		mockClient.On("Produce", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+			cb := args.Get(2).(func(*kgo.Record, error))
+			go func() {
+				time.Sleep(1 * time.Millisecond)
+				cb(args.Get(1).(*kgo.Record), nil)
+			}()
+		})
+
+		p := newTestPublisher(DynamicConfig{
+			TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+		})
+		p.MaxBufferedRecords = 100
+		p.MaxBufferedBytes = 0
+		p.clientMu.Lock()
+		p.client = mockClient
+		p.clientMu.Unlock()
+
+		msg := &wrp.Message{
+			Type:             wrp.SimpleEventMessageType,
+			Metadata:         map[string]string{DefaultMetadataKeyField: "mac:112233445566"},
+			Destination:      "event:test",
+			QualityOfService: 50, // Medium QoS - uses Produce, not TryProduce
+		}
+
+		result, err := p.Produce(context.Background(), msg)
+
+		// Verify result - should be Queued, not Dropped
+		assert.Equal(t, Queued, result)
+		assert.NoError(t, err)
+
+		// Verify Produce was called (not TryProduce)
+		mockClient.AssertCalled(t, "Produce", mock.Anything, mock.Anything, mock.Anything)
+		mockClient.AssertNotCalled(t, "TryProduce")
+	})
 }
