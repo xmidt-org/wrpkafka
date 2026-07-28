@@ -411,28 +411,14 @@ func (p *Publisher) Produce(ctx context.Context, msg *wrp.Message) (Outcome, err
 
 		if qos <= 24 {
 			// Low QoS: Fire-and-forget with TryProduce
-			// TryProduce silently drops messages when buffer is full WITHOUT calling the callback.
-			// Check buffer capacity first and dispatch Dropped event if full.
-			bufferFull := false
-			if p.MaxBufferedRecords > 0 && client.BufferedProduceRecords() >= int64(p.MaxBufferedRecords) {
-				bufferFull = true
-			} else if p.MaxBufferedBytes > 0 && client.BufferedProduceBytes() >= int64(p.MaxBufferedBytes) {
-				bufferFull = true
-			}
-
-			if bufferFull {
-				// Buffer is full - message will be dropped
-				p.dispatchEvent(&recordEvent, startTime, ErrBufferFull)
-				returnOutcome = Dropped
-			} else {
-				// Buffer has space - attempt to produce
-				// Capture recordEvent in closure to avoid loop variable capture bug
-				evt := recordEvent
-				client.TryProduce(ctx, record, func(r *kgo.Record, err error) {
-					p.dispatchEvent(&evt, startTime, err)
-				})
-				returnOutcome = Attempted
-			}
+			// Note: TryProduce silently drops messages when buffer is full without calling the callback.
+			// This is by design for fire-and-forget semantics.
+			// Capture recordEvent in closure to avoid loop variable capture bug
+			evt := recordEvent
+			client.TryProduce(ctx, record, func(r *kgo.Record, err error) {
+				p.dispatchEvent(&evt, startTime, err)
+			})
+			returnOutcome = Attempted
 		} else if qos <= 74 {
 			// Medium QoS: Async with retry, block if buffer full
 			// Callback dispatches event for both success and error cases
