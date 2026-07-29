@@ -1,6 +1,6 @@
 module github.com/xmidt-org/wrpkafka
 
-go 1.25.2
+go 1.26.5
 
 require (
 	github.com/prometheus/client_golang v1.24.0
@@ -10,7 +10,7 @@ require (
 	github.com/twmb/franz-go v1.21.5
 	github.com/twmb/franz-go/plugin/kprom v1.5.0
 	github.com/xmidt-org/eventor v1.0.49
-	github.com/xmidt-org/wrp-go/v5 v5.4.3
+	github.com/xmidt-org/wrp-go/v5 v5.4.4
 )
 
 require (
