@@ -46,3 +46,8 @@ func (m *mockKafkaClient) ProduceSync(ctx context.Context, rs ...*kgo.Record) kg
 	args := m.Called(ctx, rs)
 	return args.Get(0).(kgo.ProduceResults)
 }
+
+func (m *mockKafkaClient) Ping(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
+}

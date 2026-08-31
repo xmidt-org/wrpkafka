@@ -57,6 +57,32 @@ func TestPublisherLifecycle(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("start fails if broker connectivity check fails", func(t *testing.T) {
+		t.Parallel()
+		p := &Publisher{
+			Brokers: []string{"localhost:9092"},
+			InitialDynamicConfig: DynamicConfig{
+				TopicMap: []TopicRoute{{Pattern: "*", Topic: "t"}},
+			},
+		}
+
+		// Mock client that fails Ping
+		mockClient := &mockKafkaClient{}
+		mockClient.On("Ping", mock.Anything).Return(errors.New("connection refused"))
+		mockClient.On("Close").Return()
+
+		p.clientFactory = func(opts ...kgo.Opt) (kafkaClient, error) {
+			return mockClient, nil
+		}
+
+		err := p.Start()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to connect to Kafka brokers")
+
+		// Verify client was closed after ping failure
+		mockClient.AssertCalled(t, "Close")
+	})
+
 	t.Run("stop flushes and closes client", func(t *testing.T) {
 		t.Parallel()
 		mockClient := &mockKafkaClient{}
@@ -337,6 +363,7 @@ func TestEventListeners(t *testing.T) {
 
 		// Set mock client factory
 		mockClient := &mockKafkaClient{}
+		mockClient.On("Ping", mock.Anything).Return(nil)
 		mockClient.On("TryProduce", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 			cb := args.Get(2).(func(*kgo.Record, error))
 			cb(args.Get(1).(*kgo.Record), nil)
@@ -452,25 +479,95 @@ func TestConfigConcurrency(t *testing.T) {
 func TestProduceContextCancellation(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately
+	t.Run("canceled context dispatches event", func(t *testing.T) {
+		t.Parallel()
 
-	p := newTestPublisher(DynamicConfig{
-		TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+		ctx, cancelCtx := context.WithCancel(context.Background())
+		cancelCtx() // Cancel immediately
+
+		p := newTestPublisher(DynamicConfig{
+			TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+		})
+
+		// Setup event listener to verify event is dispatched
+		var eventMu sync.Mutex
+		var capturedEvents []PublishEvent
+
+		eventListener := func(event *PublishEvent) {
+			eventMu.Lock()
+			defer eventMu.Unlock()
+			capturedEvents = append(capturedEvents, *event)
+		}
+		removeListener := p.AddPublishEventListener(eventListener)
+		defer removeListener()
+
+		msg := &wrp.Message{
+			Type:             wrp.SimpleEventMessageType,
+			Metadata:         map[string]string{DefaultMetadataKeyField: "mac:112233445566"},
+			Destination:      "event:test",
+			QualityOfService: 50,
+		}
+
+		result, err := p.Produce(ctx, msg)
+
+		// Verify result
+		assert.Equal(t, Failed, result)
+		assert.Error(t, err)
+		assert.Equal(t, context.Canceled, err)
+
+		// Verify event was dispatched
+		eventMu.Lock()
+		defer eventMu.Unlock()
+		assert.Len(t, capturedEvents, 1, "Expected 1 event for context cancellation")
+		assert.Equal(t, context.Canceled, capturedEvents[0].Error)
+		assert.NotEmpty(t, capturedEvents[0].ErrorType)
+		assert.True(t, capturedEvents[0].Duration > 0)
 	})
 
-	msg := &wrp.Message{
-		Type:             wrp.SimpleEventMessageType,
-		Metadata:         map[string]string{DefaultMetadataKeyField: "mac:112233445566"},
-		Destination:      "event:test",
-		QualityOfService: 50,
-	}
+	t.Run("deadline exceeded context dispatches event", func(t *testing.T) {
+		t.Parallel()
 
-	result, err := p.Produce(ctx, msg)
+		ctx, cancelCtx := context.WithDeadline(context.Background(), time.Now().Add(-1*time.Second))
+		defer cancelCtx()
 
-	assert.Equal(t, Failed, result)
-	assert.Error(t, err)
-	assert.Equal(t, context.Canceled, err)
+		p := newTestPublisher(DynamicConfig{
+			TopicMap: []TopicRoute{{Pattern: "*", Topic: "topic1"}},
+		})
+
+		// Setup event listener
+		var eventMu sync.Mutex
+		var capturedEvents []PublishEvent
+
+		eventListener := func(event *PublishEvent) {
+			eventMu.Lock()
+			defer eventMu.Unlock()
+			capturedEvents = append(capturedEvents, *event)
+		}
+		removeListener := p.AddPublishEventListener(eventListener)
+		defer removeListener()
+
+		msg := &wrp.Message{
+			Type:             wrp.SimpleEventMessageType,
+			Metadata:         map[string]string{DefaultMetadataKeyField: "mac:112233445566"},
+			Destination:      "event:test",
+			QualityOfService: 50,
+		}
+
+		result, err := p.Produce(ctx, msg)
+
+		// Verify result
+		assert.Equal(t, Failed, result)
+		assert.Error(t, err)
+		assert.Equal(t, context.DeadlineExceeded, err)
+
+		// Verify event was dispatched
+		eventMu.Lock()
+		defer eventMu.Unlock()
+		assert.Len(t, capturedEvents, 1, "Expected 1 event for deadline exceeded")
+		assert.Equal(t, context.DeadlineExceeded, capturedEvents[0].Error)
+		assert.NotEmpty(t, capturedEvents[0].ErrorType)
+		assert.True(t, capturedEvents[0].Duration > 0)
+	})
 }
 
 // TestProduceNotStarted tests behavior when client is not started
