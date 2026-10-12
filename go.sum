@@ -134,8 +134,8 @@ github.com/testcontainers/testcontainers-go v0.44.0 h1:/Fwh6HY1mIikhnm9e7HwoxGyc
 github.com/testcontainers/testcontainers-go v0.44.0/go.mod h1:IcnwQrYTO86xHXu5bvMaBH7ATlbS3Qn1M1QWW3c66rE=
 github.com/testcontainers/testcontainers-go/modules/kafka v0.44.0 h1:KOyj22XaB0X2RsyQKQKthzcWObKtni0kLrV1HqFVeec=
 github.com/testcontainers/testcontainers-go/modules/kafka v0.44.0/go.mod h1:OP4szEj4BpOH/UZhbtNER1ERRSj4YJ6hu2x+FIBdo5o=
-github.com/tinylib/msgp v1.6.4 h1:mOwYbyYDLPj35mkA2BjjYejgJk9BuHxDdvRnb6v2ZcQ=
-github.com/tinylib/msgp v1.6.4/go.mod h1:RSp0LW9oSxFut3KzESt5Voq4GVWyS+PSulT77roAqEA=
+github.com/tinylib/msgp v1.6.5 h1:iAH6XTP7BpzErjBZlujJQXxA+GmRi2YWs6M4KdLtNbE=
+github.com/tinylib/msgp v1.6.5/go.mod h1:RSp0LW9oSxFut3KzESt5Voq4GVWyS+PSulT77roAqEA=
 github.com/tklauser/go-sysconf v0.4.0 h1:7H0uAN+7RkwWRaxhYXDLqa5V3LPrJeV8wmD9dRUgPQU=
 github.com/tklauser/go-sysconf v0.4.0/go.mod h1:8mTNWyog7H+MpKijp4VmKJAd2bbYQ2zuUwkYRbUArPI=
 github.com/tklauser/numcpus v0.12.0 h1:NR85qdvHA9pFse3x3weVZ0r0ST8R6l5RHbZrlRaqob4=
@@ -148,8 +148,8 @@ github.com/twmb/franz-go/plugin/kprom v1.5.0 h1:TL1ybuCfOZSCFbuYB9sPexbDsBDTOQoB
 github.com/twmb/franz-go/plugin/kprom v1.5.0/go.mod h1:5QMSg0mtIjzZiVs+TfaNqZxo4q5tnBivQpc3BjF2lis=
 github.com/xmidt-org/eventor v1.0.51 h1:9hIbcsQ/dk/z2+ISOUsA7CcTWeYUoS9DAz0Sk/Ft1hw=
 github.com/xmidt-org/eventor v1.0.51/go.mod h1:7h3vQdzWfSxq1Icdg5oGAzuYL+efm20UnZIRLyimL+g=
-github.com/xmidt-org/wrp-go/v5 v5.4.6 h1:7v2jrC+42617ooTfCHzsYDLVXj5oM7njVqtGbNbTijM=
-github.com/xmidt-org/wrp-go/v5 v5.4.6/go.mod h1:qciLrhMJl22nZSqDNC7K1tH8S1HDmLBx2TtU4O6rL4Q=
+github.com/xmidt-org/wrp-go/v5 v5.4.7 h1:BJuz1doC6emDJPli9vmXTsroKciU4CsBedu3YJYamv8=
+github.com/xmidt-org/wrp-go/v5 v5.4.7/go.mod h1:9yUu4CPck8WP5uzrEVmXMPBtvsTLEzaHWkzG/dtjlmI=
 github.com/yusufpapurcu/wmi v1.2.4 h1:zFUKzehAFReQwLys1b/iSMl+JQGSCSjtVqQn9bBrPo0=
 github.com/yusufpapurcu/wmi v1.2.4/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=
