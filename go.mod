@@ -10,7 +10,7 @@ require (
 	github.com/twmb/franz-go v1.21.7
 	github.com/twmb/franz-go/plugin/kprom v1.5.0
 	github.com/xmidt-org/eventor v1.0.51
-	github.com/xmidt-org/wrp-go/v5 v5.4.6
+	github.com/xmidt-org/wrp-go/v5 v5.4.7
 )
 
 require (
@@ -60,7 +60,7 @@ require (
 	github.com/shirou/gopsutil/v4 v4.26.6 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
-	github.com/tinylib/msgp v1.6.4 // indirect
+	github.com/tinylib/msgp v1.6.5 // indirect
 	github.com/tklauser/go-sysconf v0.4.0 // indirect
 	github.com/tklauser/numcpus v0.12.0 // indirect
 	github.com/twmb/franz-go/pkg/kmsg v1.13.1 // indirect
