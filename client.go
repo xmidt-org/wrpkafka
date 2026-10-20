@@ -34,6 +34,10 @@ type kafkaClient interface {
 
 	// BufferedProduceBytes returns the current number of buffered bytes.
 	BufferedProduceBytes() int64
+
+	// Ping pings all seed brokers to verify connectivity.
+	// Returns an error if no brokers can be reached.
+	Ping(ctx context.Context) error
 }
 
 // Verify that *kgo.Client implements kafkaClient interface at compile time.

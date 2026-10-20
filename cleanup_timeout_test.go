@@ -30,9 +30,10 @@ func (c *captureFlushClient) Flush(ctx context.Context) error {
 	*c.capturedCtx = ctx
 	return nil
 }
-func (c *captureFlushClient) Close()                        {}
-func (c *captureFlushClient) BufferedProduceRecords() int64 { return 0 }
-func (c *captureFlushClient) BufferedProduceBytes() int64   { return 0 }
+func (c *captureFlushClient) Close()                         {}
+func (c *captureFlushClient) BufferedProduceRecords() int64  { return 0 }
+func (c *captureFlushClient) BufferedProduceBytes() int64    { return 0 }
+func (c *captureFlushClient) Ping(ctx context.Context) error { return nil }
 
 // TestStop_CleanupTimeoutRespectsCaller tests that CleanupTimeout
 // only applies when the caller's context has no deadline.
